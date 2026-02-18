@@ -337,7 +337,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
 
     def display_status(self) -> None:
         """Display enhanced status report."""
-        logs = get_session_logs()
+        logs = get_session_logs()  # Reads from persistent threats.json file
         threat_types = [log.get('threat_type', 'unknown') for log in logs]
         threat_counts = Counter(threat_types)
         agent_stats = agent_manager.get_global_statistics()
@@ -361,7 +361,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         stats_table.add_column("Value", style="green", width=20)
         
         stats_data = [
-            ("Session Threats", str(len(logs))),
+            ("Threats Logged", str(len(logs))),  # Changed from "Session Threats" - now clearly shows persisted log count
             ("Unique Types", str(len(threat_counts))),
             ("Total Agents", str(agent_stats['total_agents'])),
             ("Running Agents", f"{agent_stats['running_agents']}/{agent_stats['total_agents']}"),
@@ -495,8 +495,11 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         if set_groq_api_key(api_key):
             console.print("[green]✓ GROQ API key configured successfully[/green]")
             from whitecell.groq_client import groq_client
-            if groq_client.set_api_key(api_key):
-                console.print("[green]✓ AI features are now active[/green]")
+            # Reload the client with the newly stored API key
+            if groq_client.reload_from_config():
+                console.print("[green]✓ AI features are now active and ready to use[/green]")
+            else:
+                console.print("[yellow]⚠ API key saved but client not yet initialized. Check your connection.[/yellow]")
         else:
             console.print("[red]✗ Failed to save API key[/red]")
 

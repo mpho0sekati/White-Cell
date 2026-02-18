@@ -44,35 +44,46 @@ python demo_v1_1.py
 
 Once inside the CLI:
 
-### Help
+### Quick Reference with Aliases
 ```
-WhiteCell> help
+h/? - help              st - status           l - logs              t - threats
+a - analyze             e - export            s - search            c - clear
+q - exit
 ```
-Displays all available commands and usage information.
 
-### Check Status
+### Core Commands
 ```
-WhiteCell> status
+WhiteCell> help                 # Show all commands
+WhiteCell> exit                 # Exit application
+WhiteCell> status               # Show system status
+WhiteCell> clear                # Clear Command Mode
 ```
-Shows current system state, command mode status, and session logs count.
 
-### View Threat Logs
+### Threat Management
 ```
-WhiteCell> logs
+WhiteCell> threats              # View all threat types with descriptions
+WhiteCell> logs                 # Display last 10 threat logs
+WhiteCell> logs 20              # Display last 20 threat logs
+WhiteCell> search ransomware    # Find all ransomware threats
+WhiteCell> search phishing      # Find all phishing threats
+WhiteCell> analyze ransomware   # Get detailed analysis of ransomware
+WhiteCell> analyze phishing     # Get detailed analysis of phishing
+WhiteCell> export csv           # Export logs as CSV file
+WhiteCell> export json          # Export logs as JSON file
 ```
-Displays the last 10 detected threats with risk assessments.
 
-### Clear Crisis Mode
+### Using Aliases (Faster!)
 ```
-WhiteCell> clear
+WhiteCell> h                    # Same as 'help'
+WhiteCell> st                   # Same as 'status'
+WhiteCell> l 15                 # Show last 15 logs
+WhiteCell> t                    # Show threat types
+WhiteCell> a malware            # Analyze malware threats
+WhiteCell> s data_breach        # Search for data breach incidents
+WhiteCell> e csv                # Export as CSV
+WhiteCell> c                    # Clear command mode
+WhiteCell> q                    # Quit application
 ```
-Deactivates Command Mode if it's currently active.
-
-### Exit Application
-```
-WhiteCell> exit
-```
-Safely exit the application.
 
 ## Example Scenarios
 

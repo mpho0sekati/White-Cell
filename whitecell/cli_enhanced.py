@@ -601,6 +601,8 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             self.export_logs_interactive()
         elif command == "agent":
             self.handle_agent_command(args)
+        elif command == "task":
+            self.handle_task_command(args)
         elif command == "clear":
             if self.state.command_mode:
                 self.state.deactivate_command_mode()
@@ -625,6 +627,177 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         elif subcommand == "status":
             self.display_status()
         # Add more as needed
+
+    def handle_task_command(self, args: list) -> None:
+        """Handle task commands."""
+        if not args:
+            console.print("[cyan]Task commands: assign, list, results[/cyan]")
+            return
+        
+        subcommand = args[0]
+        
+        if subcommand == "assign":
+            self.assign_task_interactive()
+        elif subcommand == "list":
+            self.list_tasks()
+        elif subcommand == "results":
+            agent_id = args[1] if len(args) > 1 else None
+            self.show_task_results(agent_id)
+        else:
+            console.print(f"[yellow]Unknown task command: {subcommand}[/yellow]")
+
+    def assign_task_interactive(self) -> None:
+        """Interactively assign a task to an agent."""
+        console.print("\n[bold cyan]═ TASK ASSIGNMENT ═[/bold cyan]\n")
+        
+        # Get available agents
+        available_agents = [
+            agent_id for agent_id, agent in agent_manager.agents.items()
+            if agent.running
+        ]
+        
+        if not available_agents:
+            console.print("[red]✗ No running agents available[/red]")
+            return
+        
+        # Select agent
+        console.print("[cyan]Running agents:[/cyan]")
+        for i, agent_id in enumerate(available_agents, 1):
+            console.print(f"  {i}. {agent_id}")
+        
+        choice = Prompt.ask("[cyan]Select agent (number or all)[/cyan]", default="1")
+        
+        if choice.lower() == "all":
+            target_agents = available_agents
+        else:
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(available_agents):
+                    target_agents = [available_agents[idx]]
+                else:
+                    console.print("[red]Invalid selection[/red]")
+                    return
+            except ValueError:
+                console.print("[red]Invalid input[/red]")
+                return
+        
+        # Select task type
+        console.print("\n[cyan]Task types:[/cyan]")
+        task_types = [
+            ("1", "check", "Run a specific security check"),
+            ("2", "scan", "Comprehensive threat scan"),
+            ("3", "threat_analysis", "Analyze a threat with AI"),
+            ("4", "remediate", "Execute threat remediation"),
+            ("5", "custom", "Run custom action"),
+        ]
+        
+        for num, task_type, desc in task_types:
+            console.print(f"  {num}. {task_type}: {desc}")
+        
+        task_choice = Prompt.ask("[cyan]Select task type[/cyan]", default="1")
+        
+        # Map selection to task type
+        task_map = {
+            "1": "check",
+            "2": "scan",
+            "3": "threat_analysis",
+            "4": "remediate",
+            "5": "custom"
+        }
+        
+        task_type = task_map.get(task_choice)
+        if not task_type:
+            console.print("[red]Invalid task type[/red]")
+            return
+        
+        # Get task parameters based on type
+        parameters = {}
+        description = ""
+        
+        if task_type == "check":
+            check_name = Prompt.ask("[cyan]Enter check name[/cyan] (process, port, file, logs, firewall, malware)", default="process")
+            parameters["check_name"] = check_name
+            description = f"Run {check_name} security check"
+            
+        elif task_type == "scan":
+            threat_data = Prompt.ask("[cyan]Enter threat data to scan[/cyan]")
+            parameters["threat_data"] = threat_data
+            description = f"Scan: {threat_data[:50]}..."
+            
+        elif task_type == "threat_analysis":
+            threat_desc = Prompt.ask("[cyan]Enter threat description[/cyan]")
+            parameters["threat_description"] = threat_desc
+            description = f"Analyze threat: {threat_desc[:50]}..."
+            
+        elif task_type == "remediate":
+            threat_type = Prompt.ask("[cyan]Enter threat type[/cyan] (ransomware, malware, exploit, denial_of_service)")
+            parameters["threat_type"] = threat_type
+            description = f"Remediate {threat_type}"
+            
+        elif task_type == "custom":
+            action = Prompt.ask("[cyan]Enter custom action[/cyan]")
+            parameters["action"] = action
+            description = f"Custom: {action}"
+        
+        # Create and assign task
+        task = agent_manager.create_task(task_type, description, parameters)
+        
+        assigned_count = 0
+        for agent_id in target_agents:
+            if agent_manager.assign_task_to_agent(agent_id, task):
+                assigned_count += 1
+        
+        if assigned_count > 0:
+            console.print(f"\n[green]✓ Task assigned to {assigned_count} agent(s)[/green]")
+            console.print(f"  Task ID: {task.task_id}")
+            console.print(f"  Type: {task_type}")
+            console.print(f"  Description: {description}")
+        else:
+            console.print("[red]✗ Failed to assign task[/red]")
+
+    def list_tasks(self) -> None:
+        """List pending and completed tasks."""
+        console.print("\n[bold cyan]═ TASK STATUS ═[/bold cyan]\n")
+        
+        tasks_by_agent = agent_manager.get_all_completed_tasks()
+        
+        if not tasks_by_agent:
+            console.print("[yellow]No tasks completed yet[/yellow]")
+            return
+        
+        for agent_id, tasks in tasks_by_agent.items():
+            if tasks:
+                console.print(f"\n[bold]{agent_id}:[/bold]")
+                for task in tasks[-5:]:  # Show last 5
+                    status_color = "green" if task["status"] == "completed" else "red" if task["status"] == "failed" else "yellow"
+                    console.print(f"  [{status_color}]{task['status']}[/{status_color}] [{task['task_type']}] {task['description']}")
+
+    def show_task_results(self, agent_id: str = None) -> None:
+        """Show detailed task results."""
+        console.print("\n[bold cyan]═ TASK RESULTS ═[/bold cyan]\n")
+        
+        if agent_id:
+            if agent_id not in agent_manager.agents:
+                console.print(f"[red]Agent {agent_id} not found[/red]")
+                return
+            
+            tasks = agent_manager.get_agent_completed_tasks(agent_id, limit=10)
+            agents_to_show = {agent_id: tasks}
+        else:
+            agents_to_show = agent_manager.get_all_completed_tasks()
+        
+        for agent_id, tasks in agents_to_show.items():
+            if tasks:
+                console.print(f"\n[bold cyan]{agent_id}:[/bold cyan]")
+                for task in tasks[-3:]:  # Show last 3
+                    console.print(f"\n  Task: {task['task_id']}")
+                    console.print(f"  Type: {task['task_type']}")
+                    console.print(f"  Status: {task['status']}")
+                    console.print(f"  Description: {task['description']}")
+                    if task['error']:
+                        console.print(f"  Error: {task['error']}")
+                    if task['result']:
+                        console.print(f"  Result: {json.dumps(task['result'], indent=2)[:200]}...")
 
 
 def main() -> None:

@@ -13,12 +13,70 @@ import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Callable
 from pathlib import Path
+from enum import Enum
+from queue import Queue
 
 from whitecell.detection import detect_threat
 from whitecell.risk import calculate_risk, get_threat_mitigations
 from whitecell.security_checks import run_all_checks, get_check_by_name
 from whitecell.config import load_config, get_config_value
 from whitecell.groq_client import groq_client
+
+
+class TaskStatus(str, Enum):
+    """Task status enumeration."""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class Task:
+    """
+    Represents a task to be executed by an agent.
+    """
+
+    def __init__(
+        self,
+        task_id: str,
+        task_type: str,
+        description: str,
+        parameters: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Initialize a task.
+
+        Args:
+            task_id: Unique task identifier
+            task_type: Type of task (check, scan, threat_analysis, remediate, custom)
+            description: Human-readable description
+            parameters: Task-specific parameters
+        """
+        self.task_id = task_id
+        self.task_type = task_type
+        self.description = description
+        self.parameters = parameters or {}
+        self.status = TaskStatus.PENDING
+        self.created_at = datetime.now()
+        self.started_at = None
+        self.completed_at = None
+        self.result = None
+        self.error = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert task to dictionary."""
+        return {
+            "task_id": self.task_id,
+            "task_type": self.task_type,
+            "description": self.description,
+            "parameters": self.parameters,
+            "status": self.status.value,
+            "created_at": self.created_at.isoformat(),
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "result": self.result,
+            "error": self.error
+        }
 
 
 class Agent:
@@ -43,6 +101,11 @@ class Agent:
         self.start_time = None
         self.on_threat_detected = None
         self.on_prevention_action = None
+        
+        # Task management
+        self.task_queue = Queue()
+        self.tasks_completed = []
+        self.on_task_completed = None
 
     def start(self) -> bool:
         """
@@ -86,10 +149,206 @@ class Agent:
         """Main agent execution loop."""
         while self.running:
             try:
+                # Process any pending tasks first
+                self._process_task_queue()
+                
+                # Then perform periodic security checks
                 self._perform_checks()
                 time.sleep(self.check_interval)
             except Exception as e:
                 print(f"Agent {self.agent_id} error: {e}")
+
+    def _process_task_queue(self):
+        """Process pending tasks from the queue."""
+        while not self.task_queue.empty():
+            try:
+                task = self.task_queue.get_nowait()
+                self._execute_task(task)
+            except Exception as e:
+                print(f"Error processing task queue: {e}")
+
+    def _execute_task(self, task: Task) -> None:
+        """
+        Execute a task.
+
+        Args:
+            task: Task to execute
+        """
+        task.status = TaskStatus.RUNNING
+        task.started_at = datetime.now()
+
+        try:
+            # Route to appropriate task handler
+            if task.task_type == "check":
+                result = self._task_run_check(task)
+            elif task.task_type == "scan":
+                result = self._task_scan(task)
+            elif task.task_type == "threat_analysis":
+                result = self._task_analyze_threat(task)
+            elif task.task_type == "remediate":
+                result = self._task_remediate(task)
+            elif task.task_type == "custom":
+                result = self._task_custom(task)
+            else:
+                raise ValueError(f"Unknown task type: {task.task_type}")
+
+            task.result = result
+            task.status = TaskStatus.COMPLETED
+        except Exception as e:
+            task.error = str(e)
+            task.status = TaskStatus.FAILED
+            print(f"Task {task.task_id} failed: {e}")
+        finally:
+            task.completed_at = datetime.now()
+            self.tasks_completed.append(task)
+
+            # Call callback if registered
+            if self.on_task_completed:
+                self.on_task_completed(task)
+
+    def _task_run_check(self, task: Task) -> Dict[str, Any]:
+        """Execute a specific security check."""
+        check_name = task.parameters.get("check_name")
+        if not check_name:
+            raise ValueError("check_name parameter required")
+
+        result = get_check_by_name(check_name)
+        threats = result.get("threats", [])
+
+        if threats:
+            for threat in threats:
+                self._handle_threat_detection(threat, f"task:{task.task_id}")
+
+        return {
+            "check_name": check_name,
+            "threats_detected": len(threats),
+            "threats": threats
+        }
+
+    def _task_scan(self, task: Task) -> Dict[str, Any]:
+        """Execute a comprehensive security scan."""
+        threat_data = task.parameters.get("threat_data", "")
+        
+        threat_info = detect_threat(threat_data)
+        scan_results = {
+            "threat_detected": threat_info is not None,
+            "threat_type": threat_info[0] if threat_info else None,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        if threat_info:
+            risk_info = calculate_risk(threat_info[0], threat_data)
+            scan_results["risk_score"] = risk_info.get("risk_score")
+            scan_results["risk_level"] = risk_info.get("risk_level")
+            
+            # Handle threat
+            threat_record = {
+                "timestamp": datetime.now().isoformat(),
+                "threat": threat_data,
+                "source": f"task:{task.task_id}",
+                "agent_id": self.agent_id,
+                "threat_type": threat_info[0],
+                "risk_score": risk_info.get("risk_score"),
+            }
+            self.threats_detected.append(threat_record)
+
+        return scan_results
+
+    def _task_analyze_threat(self, task: Task) -> Dict[str, Any]:
+        """Analyze a specific threat using GROQ if available."""
+        threat_description = task.parameters.get("threat_description")
+        indicators = task.parameters.get("indicators", [])
+
+        if not threat_description:
+            raise ValueError("threat_description parameter required")
+
+        analysis = {
+            "threat_description": threat_description,
+            "indicators": indicators,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        if groq_client.is_configured():
+            groq_analysis = groq_client.analyze_threat(threat_description, indicators)
+            analysis["groq_analysis"] = groq_analysis
+            analysis["ai_powered"] = True
+        else:
+            analysis["ai_powered"] = False
+            analysis["message"] = "GROQ not configured - using built-in analysis"
+
+        return analysis
+
+    def _task_remediate(self, task: Task) -> Dict[str, Any]:
+        """Execute remediation for a threat."""
+        threat_type = task.parameters.get("threat_type")
+        if not threat_type:
+            raise ValueError("threat_type parameter required")
+
+        action = self._execute_prevention_action(threat_type)
+        return {
+            "threat_type": threat_type,
+            "action_taken": action,
+            "timestamp": datetime.now().isoformat(),
+            "success": True
+        }
+
+    def _task_custom(self, task: Task) -> Dict[str, Any]:
+        """Execute a custom task."""
+        # Custom tasks can be defined by the user
+        action = task.parameters.get("action", "No action specified")
+        return {
+            "custom_action": action,
+            "timestamp": datetime.now().isoformat(),
+            "parameters": task.parameters
+        }
+
+    def assign_task(self, task: Task) -> bool:
+        """
+        Assign a task to this agent.
+
+        Args:
+            task: Task to assign
+
+        Returns:
+            True if task was queued
+        """
+        if not self.running:
+            return False
+
+        self.task_queue.put(task)
+        return True
+
+    def get_pending_tasks(self) -> List[Task]:
+        """
+        Get list of pending tasks.
+
+        Returns:
+            List of pending tasks
+        """
+        # Queue doesn't have an easy way to peek, so we return empty
+        # In production, you might want to track this separately
+        return []
+
+    def get_completed_tasks(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get recently completed tasks.
+
+        Args:
+            limit: Maximum number of tasks to return
+
+        Returns:
+            List of completed task records
+        """
+        return [task.to_dict() for task in self.tasks_completed[-limit:]]
+
+    def register_task_callback(self, callback: Callable):
+        """
+        Register callback for task completion.
+
+        Args:
+            callback: Function to call when task completes
+        """
+        self.on_task_completed = callback
 
     def _perform_checks(self):
         """Perform security checks."""
@@ -424,6 +683,85 @@ class AgentManager:
             "threat_type": threat_type,
             "action": action
         })
+
+    def assign_task_to_agent(self, agent_id: str, task: Task) -> bool:
+        """
+        Assign a task to a specific agent.
+
+        Args:
+            agent_id: Agent ID to assign task to
+            task: Task to assign
+
+        Returns:
+            True if task was assigned
+        """
+        if agent_id in self.agents:
+            return self.agents[agent_id].assign_task(task)
+        return False
+
+    def assign_task_to_all_agents(self, task: Task) -> int:
+        """
+        Assign a task to all running agents.
+
+        Args:
+            task: Task to assign
+
+        Returns:
+            Number of agents task was assigned to
+        """
+        count = 0
+        for agent in self.agents.values():
+            if agent.running and agent.assign_task(task):
+                count += 1
+        return count
+
+    def create_task(
+        self,
+        task_type: str,
+        description: str,
+        parameters: Optional[Dict[str, Any]] = None
+    ) -> Task:
+        """
+        Create a new task.
+
+        Args:
+            task_type: Type of task (check, scan, threat_analysis, remediate, custom)
+            description: Human-readable description
+            parameters: Task-specific parameters
+
+        Returns:
+            Created Task object
+        """
+        import uuid
+        task_id = f"task-{uuid.uuid4().hex[:8]}"
+        return Task(task_id, task_type, description, parameters)
+
+    def get_agent_completed_tasks(self, agent_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get completed tasks for an agent.
+
+        Args:
+            agent_id: Agent ID
+            limit: Maximum number of tasks to return
+
+        Returns:
+            List of completed task records
+        """
+        if agent_id in self.agents:
+            return self.agents[agent_id].get_completed_tasks(limit)
+        return []
+
+    def get_all_completed_tasks(self) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Get completed tasks for all agents.
+
+        Returns:
+            Dictionary of agent ID to completed tasks
+        """
+        return {
+            agent_id: agent.get_completed_tasks(10)
+            for agent_id, agent in self.agents.items()
+        }
 
     def export_all_data(self, filepath: str) -> bool:
         """

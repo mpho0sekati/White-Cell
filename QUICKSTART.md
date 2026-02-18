@@ -62,7 +62,19 @@ Shows current system state, command mode status, and session logs count.
 ```
 WhiteCell> logs
 ```
-Displays the last 10 detected threats with risk assessments.
+Displays the last 10 detected threats with risk assessments from JSONL logs.
+
+### Optional Groq Explain
+```
+WhiteCell> explain suspicious login from unknown ASN
+```
+Uses optional Groq reasoning if enabled and configured.
+
+### Optional Groq Strategy
+```
+WhiteCell> strategy ransomware
+```
+Uses optional Groq strategy guidance for a threat type.
 
 ### Clear Crisis Mode
 ```
@@ -125,10 +137,15 @@ WhiteCell> How can I improve my password security?
 
 Threat logs are automatically saved to:
 ```
-<project_root>/logs/threats.json
+<project_root>/logs/threats.jsonl
 ```
 
-The application computes this path at runtime from the repository root (`whitecell/engine.py`) by creating `<project_root>/logs/threats.json` automatically.
+The application computes this path at runtime from the repository root (`whitecell/engine.py`) and writes append-only JSON Lines (JSONL).
+
+Logging lifecycle behavior:
+- Structured records include a `schema_version` field for compatibility.
+- Files rotate automatically when size thresholds are reached.
+- Retention keeps only the most recent rotated files.
 
 Each log entry contains:
 - Timestamp (ISO format)
@@ -160,13 +177,19 @@ Each log entry contains:
 
 ## Environment Variables
 
-To use Groq AI features (future), set one of the following:
+To use optional Groq commands (`explain`, `strategy`), set one of the following:
 ```bash
 # macOS/Linux
 export GROQ_API_KEY=your_api_key_here
 
 # Windows (PowerShell)
 $env:GROQ_API_KEY="your_api_key_here"
+```
+
+Feature flag (enabled by default):
+```bash
+# Disable Groq commands
+export WHITECELL_ENABLE_GROQ=0
 ```
 
 ## Troubleshooting
@@ -202,7 +225,8 @@ chcp 65001
 - POPIA exposure detection
 - Command Mode with suggested actions
 - Rich terminal formatting
-- Threat logging to JSON
+- Structured threat logging to JSONL with schema versioning
+- Log rotation and retention policy
 - Interactive CLI with help system
 - Session state management
 

@@ -31,13 +31,21 @@ class EngineIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.logs_dir = Path(self.temp_dir.name)
-        self.logs_file = self.logs_dir / "threats.json"
+        self.logs_file = self.logs_dir / "threats.jsonl"
+        self.legacy_logs_file = self.logs_dir / "threats.json"
 
         # Patch logging targets
         self.original_logs_dir = engine.LOGS_DIR
         self.original_logs_file = engine.LOGS_FILE
+        self.original_legacy_logs_file = engine.LEGACY_LOGS_FILE
+        self.original_rotation_max_bytes = engine.LOG_ROTATION_MAX_BYTES
+        self.original_retention_files = engine.LOG_RETENTION_FILES
+
         engine.LOGS_DIR = self.logs_dir
         engine.LOGS_FILE = self.logs_file
+        engine.LEGACY_LOGS_FILE = self.legacy_logs_file
+        engine.LOG_ROTATION_MAX_BYTES = 1_000_000
+        engine.LOG_RETENTION_FILES = 5
 
         # Reset shared state for deterministic tests
         global_state.command_mode = False
@@ -48,6 +56,9 @@ class EngineIntegrationTests(unittest.TestCase):
     def tearDown(self):
         engine.LOGS_DIR = self.original_logs_dir
         engine.LOGS_FILE = self.original_logs_file
+        engine.LEGACY_LOGS_FILE = self.original_legacy_logs_file
+        engine.LOG_ROTATION_MAX_BYTES = self.original_rotation_max_bytes
+        engine.LOG_RETENTION_FILES = self.original_retention_files
         self.temp_dir.cleanup()
 
     def test_parse_command_unit(self):
@@ -72,14 +83,16 @@ class EngineIntegrationTests(unittest.TestCase):
         self.assertIn("THREAT DETECTED", response)
         self.assertIn("COMMAND MODE ACTIVE", response)
 
-        logs = json.loads(self.logs_file.read_text())
-        self.assertEqual(len(logs), 1)
-        self.assertEqual(logs[0]["threat_type"], "ransomware")
-        self.assertIn("risk_score", logs[0])
+        lines = [line for line in self.logs_file.read_text().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1)
+        first_entry = json.loads(lines[0])
+        self.assertEqual(first_entry["threat_type"], "ransomware")
+        self.assertIn("risk_score", first_entry)
+        self.assertEqual(first_entry["schema_version"], "1.0")
 
     def test_log_file_corruption_is_handled(self):
         initialize_logging()
-        self.logs_file.write_text("{invalid_json")
+        self.logs_file.write_text("{invalid_json\n")
 
         response = handle_input("phishing email asks me to verify credentials")
         self.assertIn("THREAT DETECTED", response)
@@ -95,6 +108,36 @@ class EngineIntegrationTests(unittest.TestCase):
 
         global_state.deactivate_command_mode()
         self.assertFalse(global_state.command_mode)
+
+    def test_log_rotation_and_retention(self):
+        engine.LOG_ROTATION_MAX_BYTES = 1
+        engine.LOG_RETENTION_FILES = 2
+
+        for i in range(5):
+            handle_input(f"ransomware incident {i}")
+
+        rotated = sorted(self.logs_dir.glob("threats-*.jsonl"))
+        self.assertLessEqual(len(rotated), 2)
+        self.assertTrue(self.logs_file.exists())
+
+    def test_initialize_logging_migrates_legacy_json_array(self):
+        legacy_payload = [
+            {
+                "timestamp": "2024-01-01T00:00:00",
+                "threat_type": "malware",
+                "risk_score": 88,
+            }
+        ]
+        self.legacy_logs_file.write_text(json.dumps(legacy_payload))
+
+        initialize_logging()
+
+        self.assertFalse(self.legacy_logs_file.exists())
+        lines = [line for line in self.logs_file.read_text().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1)
+        entry = json.loads(lines[0])
+        self.assertEqual(entry["threat_type"], "malware")
+        self.assertEqual(entry["schema_version"], "1.0")
 
 
 if __name__ == "__main__":

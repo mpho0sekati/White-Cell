@@ -7,13 +7,18 @@ It uses Rich for terminal formatting and Python's built-in input loop for user i
 Author: White Cell Project
 """
 
+import os
+
 from rich.console import Console
 from rich.table import Table
 
-from whitecell.engine import handle_input, parse_command, initialize_logging, get_session_logs
+from whitecell.engine import get_session_logs, handle_input, initialize_logging, parse_command
+from whitecell.groq_client import groq_client
 from whitecell.state import global_state
 
 console = Console()
+
+GROQ_FEATURE_FLAG = "WHITECELL_ENABLE_GROQ"
 
 
 class WhiteCellCLI:
@@ -35,19 +40,37 @@ class WhiteCellCLI:
             return "[bold red][CRISIS MODE] WhiteCell>[/bold red] "
         return "[bold cyan]WhiteCell>[/bold cyan] "
 
+    @staticmethod
+    def is_groq_feature_enabled() -> bool:
+        """Return whether Groq commands are enabled via feature flag."""
+
+        return os.getenv(GROQ_FEATURE_FLAG, "1").lower() not in {"0", "false", "off", "no"}
+
+    @staticmethod
+    def groq_status_text() -> str:
+        """Return a human-readable Groq feature/configuration status."""
+
+        if not WhiteCellCLI.is_groq_feature_enabled():
+            return "DISABLED (set WHITECELL_ENABLE_GROQ=1 to enable commands)"
+        if groq_client.is_configured():
+            return "ENABLED (configured)"
+        return "ENABLED (missing GROQ_API_KEY)"
+
     def display_help(self) -> None:
         """Display help information and available commands."""
-        help_text = """
+        help_text = f"""
 [bold green]═══════════════════════════════════════════════════════════════[/bold green]
 [bold yellow]White Cell - Cybersecurity Assistant[/bold yellow]
 [bold green]═══════════════════════════════════════════════════════════════[/bold green]
 
 [bold cyan]Available Commands:[/bold cyan]
-  [yellow]exit[/yellow]        - Exit the application
-  [yellow]help[/yellow]        - Show this help message
-  [yellow]status[/yellow]      - Show current system status
-  [yellow]logs[/yellow]        - Display threat detection logs
-  [yellow]clear[/yellow]       - Clear Command Mode
+  [yellow]exit[/yellow]                 - Exit the application
+  [yellow]help[/yellow]                 - Show this help message
+  [yellow]status[/yellow]               - Show current system status
+  [yellow]logs[/yellow]                 - Display threat detection logs
+  [yellow]clear[/yellow]                - Clear Command Mode
+  [yellow]explain <query>[/yellow]      - Ask optional Groq reasoning about a scenario
+  [yellow]strategy <threat_type>[/yellow] - Ask optional Groq response strategy
 
 [bold cyan]Usage:[/bold cyan]
   Simply type your query or describe a cybersecurity scenario.
@@ -63,7 +86,9 @@ class WhiteCellCLI:
   • A risk assessment is displayed
   • Suggested actions are provided
   • Use 'clear' to exit Command Mode
-  • All threats are logged to logs/threats.json
+  • All threats are logged to logs/threats.jsonl
+
+[bold cyan]Groq Feature Status:[/bold cyan] {self.groq_status_text()}
 
 [bold green]═══════════════════════════════════════════════════════════════[/bold green]
 """
@@ -78,6 +103,7 @@ class WhiteCellCLI:
         status_table.add_row("Command Mode", "[red]ACTIVE[/red]" if self.state.command_mode else "[green]INACTIVE[/green]")
         status_table.add_row("Session Logs", str(len(self.state.logs)))
         status_table.add_row("Last Threat", self.state.last_threat.get("threat_type", "None"))
+        status_table.add_row("Groq", self.groq_status_text())
 
         console.print(status_table)
 
@@ -123,26 +149,49 @@ class WhiteCellCLI:
             console.print("[bold green]Exiting White Cell. Stay secure![/bold green]")
             return False
 
-        elif command == "help":
+        if command == "help":
             self.display_help()
+            return True
 
-        elif command == "status":
+        if command == "status":
             self.display_status()
+            return True
 
-        elif command == "logs":
+        if command == "logs":
             self.display_logs()
+            return True
 
-        elif command == "clear":
+        if command == "clear":
             if self.state.command_mode:
                 self.state.deactivate_command_mode()
                 console.print("[green]Command Mode deactivated.[/green]")
             else:
                 console.print("[yellow]Command Mode is not active.[/yellow]")
+            return True
 
-        else:
-            return None  # Not a recognized command
+        if command == "explain":
+            if not self.is_groq_feature_enabled():
+                console.print("[yellow]Groq commands are disabled by feature flag.[/yellow]")
+                return True
+            query = " ".join(args).strip()
+            if not query:
+                console.print("[yellow]Usage: explain <query>[/yellow]")
+                return True
+            console.print(groq_client.get_explanation(query))
+            return True
 
-        return True
+        if command == "strategy":
+            if not self.is_groq_feature_enabled():
+                console.print("[yellow]Groq commands are disabled by feature flag.[/yellow]")
+                return True
+            threat_type = " ".join(args).strip()
+            if not threat_type:
+                console.print("[yellow]Usage: strategy <threat_type>[/yellow]")
+                return True
+            console.print(groq_client.get_strategy(threat_type))
+            return True
+
+        return None
 
     def start(self) -> None:
         """Start the interactive CLI session."""
@@ -161,7 +210,7 @@ class WhiteCellCLI:
                 command, args = parse_command(user_input)
 
                 # Handle built-in commands
-                if command in ["exit", "help", "status", "logs", "clear"]:
+                if command in ["exit", "help", "status", "logs", "clear", "explain", "strategy"]:
                     result = self.handle_command(command, args)
                     if result is False:
                         break

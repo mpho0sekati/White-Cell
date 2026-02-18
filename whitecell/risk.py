@@ -3,11 +3,89 @@ White Cell Risk Scoring
 
 This module implements risk scoring for detected threats.
 It calculates risk scores (0-100), estimated financial loss, and POPIA exposure.
+Provides actionable recommendations based on threat severity.
 
 Author: White Cell Project
 """
 
 from typing import Literal
+
+
+# Mitigation strategies for each threat type
+THREAT_MITIGATIONS = {
+    "ransomware": [
+        "Conduct immediate backup verification (test recovery)",
+        "Isolate affected systems from network",
+        "Disable suspicious user accounts",
+        "Review recent admin activity logs",
+        "Prepare ransomware negotiation team if needed",
+        "Contact cyber insurance provider",
+    ],
+    "malware": [
+        "Scan all systems with updated antivirus",
+        "Check for rootkits using specialized tools",
+        "Review network for command & control callbacks",
+        "Quarantine infected systems",
+        "Perform memory forensics on affected hosts",
+        "Update all security definitions",
+    ],
+    "data_breach": [
+        "Identify scope of data compromise",
+        "Notify affected individuals immediately",
+        "Engage incident response team",
+        "Preserve evidence for investigation",
+        "Contact legal and compliance teams",
+        "Monitor dark web for leaked data",
+    ],
+    "phishing": [
+        "Send warning email to all users",
+        "Block sender across email systems",
+        "Check if users clicked/submitted credentials",
+        "Force password reset for affected users",
+        "Review webmail logs for unauthorized access",
+        "Update email filtering rules",
+    ],
+    "exploit": [
+        "Patch affected systems immediately",
+        "Review for signs of exploitation",
+        "Check intrusion detection logs",
+        "Monitor for related CVE exploitations",
+        "Test patch deployment process",
+        "Review security controls for gaps",
+    ],
+    "lateral_movement": [
+        "Enable advanced session monitoring",
+        "Review privileged account usage",
+        "Implement/verify network segmentation",
+        "Check for suspicious admin activities",
+        "Review security group memberships",
+        "Deploy additional monitoring on sensitive systems",
+    ],
+    "denial_of_service": [
+        "Activate DDoS mitigation services",
+        "Implement rate limiting",
+        "Review network bandwidth utilization",
+        "Coordinate with ISP for upstream filtering",
+        "Analyze attack patterns",
+        "Prepare incident communication",
+    ],
+    "credential_theft": [
+        "Force password resets for compromised accounts",
+        "Monitor for unauthorized account usage",
+        "Review MFA logs for suspicious activity",
+        "Check for forwarding rules on compromised accounts",
+        "Audit recent permission changes",
+        "Enable enhanced credential monitoring",
+    ],
+    "supply_chain": [
+        "Audit all third-party access and permissions",
+        "Review supply chain security agreements",
+        "Implement additional monitoring on vendor access",
+        "Verify integrity of vendor-provided software",
+        "Review vendor incident response procedures",
+        "Consider alternative suppliers",
+    ],
+}
 
 
 def calculate_risk(threat_info: dict) -> dict:
@@ -139,3 +217,20 @@ def format_risk_summary(risk_info: dict) -> str:
   Action: {recommendation}
 """
     return output.strip()
+
+
+def get_threat_mitigations(threat_type: str) -> list[str]:
+    """
+    Get recommended mitigation steps for a threat type.
+
+    Args:
+        threat_type: The type of threat
+
+    Returns:
+        List of mitigation steps
+    """
+    return THREAT_MITIGATIONS.get(threat_type, [
+        "Contact your cybersecurity team",
+        "Document all relevant information",
+        "Preserve evidence for investigation",
+    ])

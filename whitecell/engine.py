@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Optional
 
 from whitecell.detection import detect_threat, get_threat_context
-from whitecell.risk import calculate_risk
-from whitecell.command_mode import display_command_mode_activation, display_suggested_actions
+from whitecell.risk import calculate_risk, get_threat_mitigations
+from whitecell.command_mode import display_command_mode_activation, display_suggested_actions, display_mitigation_plan
 from whitecell.state import global_state
 
 # Logging configuration
@@ -107,6 +107,10 @@ def handle_input(user_input: str, state_dict: Optional[dict] = None) -> str:
         # Build response with threat detection and risk summary
         response = display_command_mode_activation(threat_info, risk_info)
         response += "\n\n" + display_suggested_actions(risk_info.get("risk_level", "low"))
+        
+        # Add mitigation plan
+        mitigations = get_threat_mitigations(threat_info.get("threat_type"))
+        response += "\n" + display_mitigation_plan(threat_info.get("threat_type"), mitigations)
 
         return response
 

@@ -2,14 +2,15 @@
 White Cell Command Mode
 
 This module handles the display and management of Command Mode,
-which is activated when threats are detected.
+which is activated when threats are detected. Provides detailed
+action plans and mitigation recommendations.
 
 Author: White Cell Project
 """
 
 from rich.console import Console
 from rich.table import Table
-
+from rich.panel import Panel
 
 console = Console()
 
@@ -105,3 +106,22 @@ def create_risk_table(risk_info: dict) -> Table:
     table.add_row("POPIA Exposure", "[red]YES[/red]" if risk_info.get("popia_exposure", False) else "[green]NO[/green]")
 
     return table
+
+
+def display_mitigation_plan(threat_type: str, mitigation_steps: list[str]) -> str:
+    """
+    Display detailed mitigation plan for the detected threat.
+
+    Args:
+        threat_type: Type of threat
+        mitigation_steps: List of recommended mitigation steps
+
+    Returns:
+        Formatted string with mitigation plan
+    """
+    output = f"\n[bold blue]Mitigation Plan for {threat_type.upper()}:[/bold blue]\n"
+    
+    for i, step in enumerate(mitigation_steps, 1):
+        output += f"[bold cyan]{i}.[/bold cyan] {step}\n"
+
+    return output.strip()

@@ -23,6 +23,8 @@ from whitecell.engine import handle_input, parse_command, initialize_logging, ge
 from whitecell.detection import get_all_threats, get_threat_description
 from whitecell.state import global_state
 from whitecell.command_mode import create_risk_table
+from whitecell.agent import agent_manager
+from whitecell.config import load_config, set_groq_api_key, get_groq_api_key, validate_groq_api_key
 
 console = Console()
 
@@ -309,6 +311,206 @@ class WhiteCellCLI:
 
         console.print(analysis_table)
 
+    def configure_groq_api(self) -> None:
+        """Configure Groq API key for agent AI-powered decisions."""
+        current_key = get_groq_api_key()
+        
+        if current_key:
+            console.print("[yellow]Groq API key is already configured.[/yellow]")
+            response = input("Do you want to update it? (y/n): ").strip().lower()
+            if response != 'y':
+                return
+        
+        console.print("\n[bold cyan]Groq API Key Configuration[/bold cyan]")
+        console.print("[yellow]Get your API key from: https://console.groq.com/keys[/yellow]\n")
+        
+        api_key = input("Enter your Groq API key: ").strip()
+        
+        if not api_key:
+            console.print("[red]API key cannot be empty.[/red]")
+            return
+        
+        if not validate_groq_api_key(api_key):
+            console.print("[red]Invalid API key format.[/red]")
+            return
+        
+        if set_groq_api_key(api_key):
+            console.print("[green]Groq API key configured successfully![/green]")
+            # Reinitialize groq_client with new key
+            from whitecell.groq_client import groq_client
+            groq_client.set_api_key(api_key)
+        else:
+            console.print("[red]Failed to save API key.[/red]")
+
+    def display_agent_status(self) -> None:
+        """Display status of all agents."""
+        status = agent_manager.get_all_status()
+        stats = agent_manager.get_global_statistics()
+        
+        if not status:
+            console.print("[yellow]No agents available.[/yellow]")
+            return
+        
+        # Global statistics
+        stats_table = Table(title="Global Agent Statistics", show_header=True, header_style="bold magenta")
+        stats_table.add_column("Metric", style="cyan")
+        stats_table.add_column("Value", style="green")
+        
+        stats_table.add_row("Total Agents", str(stats['total_agents']))
+        stats_table.add_row("Running Agents", str(stats['running_agents']))
+        stats_table.add_row("Total Checks", str(stats['total_checks_performed']))
+        stats_table.add_row("Threats Detected", str(stats['total_threats_detected']))
+        stats_table.add_row("Threats Prevented", str(stats['total_prevented']))
+        
+        console.print(stats_table)
+        
+        # Individual agent status
+        console.print("\n")
+        agent_table = Table(title="Individual Agent Status", show_header=True, header_style="bold magenta")
+        agent_table.add_column("Agent ID", style="cyan")
+        agent_table.add_column("Running", style="yellow")
+        agent_table.add_column("Checks", style="green")
+        agent_table.add_column("Threats", style="red")
+        agent_table.add_column("Prevented", style="green")
+        
+        for agent_id, agent_status in status.items():
+            running = "[green]Yes[/green]" if agent_status['running'] else "[yellow]No[/yellow]"
+            agent_table.add_row(
+                agent_id,
+                running,
+                str(agent_status['checks_performed']),
+                str(agent_status['threats_detected']),
+                str(agent_status['prevented_count'])
+            )
+        
+        console.print(agent_table)
+
+    def deploy_agent(self, args: list[str]) -> None:
+        """
+        Deploy a new security agent.
+        
+        Args:
+            args: Command arguments [agent_id, interval (optional)]
+        """
+        if not args:
+            console.print("[yellow]Usage: agent deploy <agent_id> [check_interval][/yellow]")
+            return
+        
+        agent_id = args[0]
+        check_interval = int(args[1]) if len(args) > 1 and args[1].isdigit() else 60
+        
+        # Create and start agent
+        agent = agent_manager.create_agent(agent_id, check_interval)
+        
+        if agent_manager.start_agent(agent_id):
+            console.print(f"[green]Agent '{agent_id}' deployed and running![/green]")
+            console.print(f"[cyan]Check interval: {check_interval} seconds[/cyan]")
+        else:
+            console.print(f"[red]Failed to start agent '{agent_id}'[/red]")
+
+    def stop_agent(self, args: list[str]) -> None:
+        """
+        Stop a running agent.
+        
+        Args:
+            args: Command arguments [agent_id]
+        """
+        if not args:
+            console.print("[yellow]Usage: agent stop <agent_id>[/yellow]")
+            return
+        
+        agent_id = args[0]
+        if agent_manager.stop_agent(agent_id):
+            console.print(f"[green]Agent '{agent_id}' stopped.[/green]")
+        else:
+            console.print(f"[red]Failed to stop agent '{agent_id}'[/red]")
+
+    def view_agent_threats(self, args: list[str]) -> None:
+        """
+        View threats detected by an agent.
+        
+        Args:
+            args: Command arguments [agent_id, limit (optional)]
+        """
+        if not args:
+            console.print("[yellow]Usage: agent threats <agent_id> [limit][/yellow]")
+            return
+        
+        agent_id = args[0]
+        limit = int(args[1]) if len(args) > 1 and args[1].isdigit() else 10
+        
+        if agent_id not in agent_manager.agents:
+            console.print(f"[red]Agent '{agent_id}' not found.[/red]")
+            return
+        
+        agent = agent_manager.agents[agent_id]
+        threats = agent.get_recent_threats(limit)
+        
+        if not threats:
+            console.print(f"[yellow]No threats detected by agent '{agent_id}'[/yellow]")
+            return
+        
+        console.print(f"\n[bold cyan]Recent Threats - Agent '{agent_id}' ({len(threats)}):[/bold cyan]\n")
+        
+        threats_table = Table(show_header=True, header_style="bold magenta")
+        threats_table.add_column("Timestamp", style="cyan")
+        threats_table.add_column("Threat Type", style="yellow")
+        threats_table.add_column("Risk Score", style="red")
+        threats_table.add_column("Prevented", style="green")
+        threats_table.add_column("Threat Details", width=40)
+        
+        for threat in threats:
+            prevented = "[green]YES[/green]" if threat.get('prevented') else "[yellow]NO[/yellow]"
+            timestamp = threat.get('timestamp', 'N/A')[:19]  # Format: YYYY-MM-DD HH:MM:SS
+            threat_text = threat.get('threat', '')[:40]
+            
+            threats_table.add_row(
+                timestamp,
+                threat.get('threat_type', 'Unknown'),
+                str(threat.get('risk_score', 0)),
+                prevented,
+                threat_text
+            )
+        
+        console.print(threats_table)
+
+    def handle_agent_command(self, args: list[str]) -> bool:
+        """
+        Handle agent-related commands.
+        
+        Args:
+            args: Command arguments
+            
+        Returns:
+            True to continue session
+        """
+        if not args:
+            console.print("[yellow]Agent Commands:[/yellow]")
+            console.print("  agent deploy <id> [interval] - Deploy a new agent")
+            console.print("  agent stop <id>              - Stop an agent")
+            console.print("  agent status                 - Show agent status")
+            console.print("  agent threats <id> [limit]   - View agent threats")
+            console.print("  agent configure              - Set Groq API key")
+            return True
+        
+        subcommand = args[0]
+        remaining_args = args[1:]
+        
+        if subcommand == "deploy":
+            self.deploy_agent(remaining_args)
+        elif subcommand == "stop":
+            self.stop_agent(remaining_args)
+        elif subcommand == "status":
+            self.display_agent_status()
+        elif subcommand == "threats":
+            self.view_agent_threats(remaining_args)
+        elif subcommand == "configure":
+            self.configure_groq_api()
+        else:
+            console.print(f"[yellow]Unknown agent subcommand: {subcommand}[/yellow]")
+        
+        return True
+
     def handle_command(self, command: str, args: list[str]) -> bool:
         """
         Handle built-in CLI commands.
@@ -363,6 +565,9 @@ class WhiteCellCLI:
             else:
                 console.print("[yellow]Command Mode is not active.[/yellow]")
 
+        elif command == "agent":
+            return self.handle_agent_command(args)
+
         else:
             return None  # Not a recognized command
 
@@ -390,7 +595,7 @@ class WhiteCellCLI:
                 command, args = parse_command(user_input)
 
                 # Handle built-in commands
-                if command in ["exit", "help", "threats", "status", "logs", "search", "analyze", "export", "clear"] or command in COMMAND_ALIASES:
+                if command in ["exit", "help", "threats", "status", "logs", "search", "analyze", "export", "clear", "agent"] or command in COMMAND_ALIASES:
                     result = self.handle_command(command, args)
                     if result is False:
                         break

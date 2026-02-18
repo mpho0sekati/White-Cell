@@ -10,17 +10,19 @@
 
 1. **Navigate to project directory:**
    ```bash
-   cd c:\Users\Admin\whitecell_project
+   cd /path/to/White-Cell
    ```
 
 2. **Create/activate virtual environment (if not already done):**
    ```bash
-   # On Windows
-   venv\Scripts\activate
-   
-   # Or create new venv
-   python -m venv venv
-   venv\Scripts\activate
+   # Create a new virtual environment
+   python -m venv .venv
+
+   # Activate on macOS/Linux
+   source .venv/bin/activate
+
+   # Activate on Windows (PowerShell)
+   .venv\Scripts\Activate.ps1
    ```
 
 3. **Install dependencies:**
@@ -123,8 +125,10 @@ WhiteCell> How can I improve my password security?
 
 Threat logs are automatically saved to:
 ```
-c:\Users\Admin\whitecell_project\logs\threats.json
+<project_root>/logs/threats.json
 ```
+
+The application computes this path at runtime from the repository root (`whitecell/engine.py`) by creating `<project_root>/logs/threats.json` automatically.
 
 Each log entry contains:
 - Timestamp (ISO format)
@@ -156,9 +160,13 @@ Each log entry contains:
 
 ## Environment Variables
 
-To use Groq AI features (future), set:
+To use Groq AI features (future), set one of the following:
 ```bash
-set GROQ_API_KEY=your_api_key_here
+# macOS/Linux
+export GROQ_API_KEY=your_api_key_here
+
+# Windows (PowerShell)
+$env:GROQ_API_KEY="your_api_key_here"
 ```
 
 ## Troubleshooting

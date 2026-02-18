@@ -2,21 +2,16 @@
 White Cell CLI: Command-line interface
 
 This module provides the interactive shell for the White Cell cybersecurity assistant.
-It uses Rich for beautiful terminal formatting and Prompt Toolkit for enhanced
-user input handling.
+It uses Rich for terminal formatting and Python's built-in input loop for user interaction.
 
 Author: White Cell Project
 """
-
-import json
-from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
 
 from whitecell.engine import handle_input, parse_command, initialize_logging, get_session_logs
 from whitecell.state import global_state
-from whitecell.command_mode import create_risk_table
 
 console = Console()
 
@@ -113,7 +108,7 @@ class WhiteCellCLI:
 
         console.print(logs_table)
 
-    def handle_command(self, command: str, args: list[str]) -> bool:
+    def handle_command(self, command: str, args: list[str]) -> bool | None:
         """
         Handle built-in CLI commands.
 
@@ -122,7 +117,7 @@ class WhiteCellCLI:
             args: Command arguments
 
         Returns:
-            True to continue the session, False to exit
+            True to continue the session, False to exit, or None if unrecognized
         """
         if command == "exit":
             console.print("[bold green]Exiting White Cell. Stay secure![/bold green]")

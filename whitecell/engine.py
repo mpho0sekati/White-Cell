@@ -153,10 +153,16 @@ def handle_input(user_input: str, state_dict: Optional[dict] = None) -> str:
         # Dispatch helper crew (if any) to triage activity
         for helper in global_state.helper_crew:
             helper_name = helper.get("name", "helper")
+            threat_type = threat_info.get("threat_type", "unknown")
             global_state.record_helper_activity(
                 helper_name,
-                f"triaging {threat_info.get('threat_type', 'unknown')} incident",
+                f"triaging {threat_type} incident",
                 "engaged",
+            )
+            global_state.learn_from_helper(
+                helper_name,
+                f"Observed {threat_type} indicators from user input: {user_input}",
+                [f"triage:{threat_type}", f"risk:{risk_info.get('risk_level', 'low')}"]
             )
 
         # Build response with threat detection and risk summary

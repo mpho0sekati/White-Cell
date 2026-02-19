@@ -105,6 +105,8 @@ class WhiteCellCLI:
         table.add_row("strategy <threat_type>", "Optional Groq strategy guidance (placeholder response)")
         table.add_row("crew spawn <name> [role]", "Create a helper agent for incident support")
         table.add_row("crew report", "Show helper crew status and recent activity")
+        table.add_row("crew learn <name> <technique> | <conversation>", "Store helper lessons for main agent memory")
+        table.add_row("crew memory [name]", "Show learned techniques/conversations from helpers")
         table.add_row("crew watch [seconds]", "Live watch helper activity stream")
         table.add_row("immune scan", "Run a host-level immune scan on this system")
         table.add_row("immune report", "Show recent immune scan summaries")
@@ -126,6 +128,7 @@ class WhiteCellCLI:
         status_table.add_row("Last Threat", self.state.last_threat.get("threat_type", "None"))
         status_table.add_row("Groq", self.groq_status_text())
         status_table.add_row("Immune Scans", str(len(self.state.immune_history)))
+        status_table.add_row("Learned Techniques", str(len(self.state.get_collective_techniques())))
 
         console.print(status_table)
 
@@ -169,6 +172,7 @@ class WhiteCellCLI:
         crew_table.add_column("Role", style="green")
         crew_table.add_column("Status", style="yellow")
         crew_table.add_column("Tasks", style="red")
+        crew_table.add_column("Techniques", style="white")
 
         for helper in self.state.helper_crew:
             crew_table.add_row(
@@ -176,6 +180,7 @@ class WhiteCellCLI:
                 helper.get("role", "analyst"),
                 helper.get("status", "idle"),
                 str(helper.get("tasks_completed", 0)),
+                ", ".join(helper.get("techniques", [])) or "-",
             )
 
         console.print(crew_table)
@@ -196,6 +201,35 @@ class WhiteCellCLI:
                 )
             console.print(activity_table)
 
+
+
+    def display_crew_memory(self, helper_name: str | None = None) -> None:
+        """Display remembered helper conversations and techniques."""
+
+        memories = self.state.get_helper_memories(helper_name)
+        if not memories:
+            scope = helper_name or "all helpers"
+            console.print(f"[yellow]No learned memory for {scope}. Use: crew learn <name> <technique> | <conversation>[/yellow]")
+            return
+
+        table = Table(title="Helper Learning Memory", show_header=True, header_style="bold magenta")
+        table.add_column("Time", style="cyan")
+        table.add_column("Helper", style="green")
+        table.add_column("Techniques", style="yellow")
+        table.add_column("Conversation", style="white")
+
+        for memory in memories[-15:]:
+            table.add_row(
+                self.format_timestamp(memory.get("timestamp", "")),
+                memory.get("helper", "helper"),
+                ", ".join(memory.get("techniques", [])) or "-",
+                memory.get("conversation", "")[:100],
+            )
+
+        console.print(table)
+        collective = self.state.get_collective_techniques()
+        if collective:
+            console.print(f"[bold cyan]Collective Techniques:[/bold cyan] {', '.join(collective)}")
 
     def display_immune_report(self) -> None:
         """Display recent host immune-scan summaries."""
@@ -312,7 +346,7 @@ class WhiteCellCLI:
 
         if command == "crew":
             if not args:
-                console.print("[yellow]Usage: crew <spawn|report|watch> ...[/yellow]")
+                console.print("[yellow]Usage: crew <spawn|report|learn|memory|watch> ...[/yellow]")
                 return True
 
             subcommand = args[0].lower()
@@ -336,6 +370,42 @@ class WhiteCellCLI:
                 self.display_crew_report()
                 return True
 
+
+            if subcommand == "learn":
+                payload = " ".join(args[1:]).strip()
+                if not payload or "|" not in payload:
+                    console.print("[yellow]Usage: crew learn <name> <technique1,technique2> | <conversation>[/yellow]")
+                    return True
+
+                left, conversation = payload.split("|", maxsplit=1)
+                left = left.strip()
+                conversation = conversation.strip()
+
+                if not left or not conversation:
+                    console.print("[yellow]Both technique and conversation are required.[/yellow]")
+                    return True
+
+                parts = left.split(maxsplit=1)
+                if len(parts) < 2:
+                    console.print("[yellow]Usage: crew learn <name> <technique1,technique2> | <conversation>[/yellow]")
+                    return True
+
+                name = parts[0]
+                techniques = [t.strip() for t in parts[1].split(",") if t.strip()]
+                if not techniques:
+                    console.print("[yellow]At least one technique is required.[/yellow]")
+                    return True
+
+                self.state.learn_from_helper(name, conversation, techniques)
+                self.state.record_helper_activity(name, "shared learning with main agent", "learning")
+                console.print(f"[green]Main agent learned from {name}:[/green] {', '.join(techniques)}")
+                return True
+
+            if subcommand == "memory":
+                helper_name = args[1] if len(args) > 1 else None
+                self.display_crew_memory(helper_name)
+                return True
+
             if subcommand == "watch":
                 watch_seconds = 8
                 if len(args) > 1 and args[1].isdigit():
@@ -343,7 +413,7 @@ class WhiteCellCLI:
                 self.display_crew_watch(watch_seconds)
                 return True
 
-            console.print("[yellow]Unknown crew command. Use spawn, report, or watch.[/yellow]")
+            console.print("[yellow]Unknown crew command. Use spawn, report, learn, memory, or watch.[/yellow]")
             return True
 
         if command == "immune":

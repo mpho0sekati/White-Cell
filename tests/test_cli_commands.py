@@ -10,6 +10,7 @@ class CLIGroqCommandTests(unittest.TestCase):
         self.cli = WhiteCellCLI()
         self.cli.state.helper_crew.clear()
         self.cli.state.helper_activity.clear()
+        self.cli.state.helper_learning.clear()
         self.cli.state.immune_history.clear()
 
     @patch("whitecell.cli.console.print")
@@ -93,6 +94,22 @@ class CLIGroqCommandTests(unittest.TestCase):
         self.assertTrue(scan_result)
         self.assertTrue(report_result)
         self.assertTrue(self.cli.state.immune_history)
+        mock_print.assert_called()
+
+    @patch("whitecell.cli.console.print")
+    def test_crew_learn_and_memory_commands(self, mock_print):
+        learn_result = self.cli.handle_command(
+            "crew",
+            ["learn", "alpha", "ioc-hunting,containment", "|", "Found suspicious C2 callback patterns"],
+        )
+        memory_result = self.cli.handle_command("crew", ["memory", "alpha"])
+
+        self.assertTrue(learn_result)
+        self.assertTrue(memory_result)
+        self.assertTrue(self.cli.state.helper_learning)
+        helper = self.cli.state.get_helper("alpha")
+        self.assertIsNotNone(helper)
+        self.assertIn("ioc-hunting", helper.get("techniques", []))
         mock_print.assert_called()
 
 

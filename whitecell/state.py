@@ -28,6 +28,7 @@ class SessionState:
     logs: list[dict[str, Any]] = field(default_factory=list)
     helper_crew: list[dict[str, Any]] = field(default_factory=list)
     helper_activity: list[dict[str, Any]] = field(default_factory=list)
+    helper_learning: list[dict[str, Any]] = field(default_factory=list)
     immune_history: list[dict[str, Any]] = field(default_factory=list)
     session_active: bool = True
 
@@ -52,6 +53,7 @@ class SessionState:
             "status": "idle",
             "created_at": datetime.now().isoformat(),
             "tasks_completed": 0,
+            "techniques": [],
         }
         self.helper_crew.append(helper)
         self.record_helper_activity(name, f"spawned with role: {role}", "created")
@@ -84,6 +86,44 @@ class SessionState:
                 return helper
         return None
 
+
+
+    def learn_from_helper(self, helper_name: str, conversation: str, techniques: list[str]) -> dict[str, Any]:
+        """Store helper conversation and techniques for main-agent memory."""
+
+        helper = self.get_helper(helper_name)
+        if helper is None:
+            helper = self.spawn_helper(helper_name, "incident analyst")
+
+        normalized_techniques = sorted({tech.strip().lower() for tech in techniques if tech.strip()})
+        memory = {
+            "timestamp": datetime.now().isoformat(),
+            "helper": helper_name,
+            "conversation": conversation.strip(),
+            "techniques": normalized_techniques,
+        }
+        self.helper_learning.append(memory)
+
+        existing = set(helper.get("techniques", []))
+        helper["techniques"] = sorted(existing.union(normalized_techniques))
+        helper["last_shared_conversation"] = conversation.strip()
+        return memory
+
+    def get_helper_memories(self, helper_name: str | None = None) -> list[dict[str, Any]]:
+        """Return recorded helper learning entries, optionally filtered by helper name."""
+
+        if not helper_name:
+            return self.helper_learning
+        return [entry for entry in self.helper_learning if entry.get("helper") == helper_name]
+
+    def get_collective_techniques(self) -> list[str]:
+        """Return unique techniques learned from all helper agents."""
+
+        techniques: set[str] = set()
+        for entry in self.helper_learning:
+            for technique in entry.get("techniques", []):
+                techniques.add(technique)
+        return sorted(techniques)
 
     def add_immune_scan(self, scan_result: dict[str, Any]) -> None:
         """Persist a host immune-scan snapshot in session state."""

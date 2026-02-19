@@ -53,6 +53,7 @@ class EngineIntegrationTests(unittest.TestCase):
         global_state.clear_logs()
         global_state.helper_crew.clear()
         global_state.helper_activity.clear()
+        global_state.helper_learning.clear()
         global_state.session_active = True
 
     def tearDown(self):
@@ -86,6 +87,8 @@ class EngineIntegrationTests(unittest.TestCase):
         self.assertTrue(global_state.helper_activity)
         self.assertEqual(global_state.helper_activity[-1]["helper"], "alpha")
         self.assertEqual(global_state.get_helper("alpha")["status"], "engaged")
+        self.assertTrue(global_state.helper_learning)
+        self.assertEqual(global_state.helper_learning[-1]["helper"], "alpha")
 
     def test_handle_input_threat_flow_detect_risk_log_response(self):
         response = handle_input("We are under ransomware attack and files are encrypted")

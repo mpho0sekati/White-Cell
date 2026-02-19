@@ -89,6 +89,18 @@ WhiteCell> crew report
 ```
 Displays helper roster plus recent helper activity.
 
+### Crew Learn
+```
+WhiteCell> crew learn alpha ioc-hunting,containment | Found suspicious C2 callback patterns
+```
+Saves helper conversation + techniques so the main agent can remember and reuse them.
+
+### Crew Memory
+```
+WhiteCell> crew memory alpha
+```
+Displays remembered techniques and conversation snippets for a helper (or all helpers).
+
 ### Crew Watch
 ```
 WhiteCell> crew watch 10

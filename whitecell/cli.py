@@ -8,8 +8,11 @@ Author: White Cell Project
 """
 
 import os
+from datetime import datetime
+from difflib import get_close_matches
 
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from whitecell.engine import get_session_logs, handle_input, initialize_logging, parse_command
@@ -19,6 +22,7 @@ from whitecell.state import global_state
 console = Console()
 
 GROQ_FEATURE_FLAG = "WHITECELL_ENABLE_GROQ"
+BUILTIN_COMMANDS = ("exit", "help", "status", "logs", "clear", "explain", "strategy")
 
 
 class WhiteCellCLI:
@@ -28,6 +32,26 @@ class WhiteCellCLI:
         """Initialize the CLI with global state."""
         self.state = global_state
         initialize_logging()
+
+    @staticmethod
+    def suggest_command(command: str) -> str | None:
+        """Suggest a known command for near-miss input typos."""
+
+        if not command:
+            return None
+        matches = get_close_matches(command, BUILTIN_COMMANDS, n=1, cutoff=0.75)
+        return matches[0] if matches else None
+
+    @staticmethod
+    def format_timestamp(timestamp: str) -> str:
+        """Format an ISO timestamp for compact table display."""
+
+        if not timestamp:
+            return "-"
+        try:
+            return datetime.fromisoformat(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return timestamp
 
     def get_prompt(self) -> str:
         """
@@ -67,41 +91,20 @@ class WhiteCellCLI:
 
     def display_help(self) -> None:
         """Display help information and available commands."""
-        help_text = f"""
-[bold green]═══════════════════════════════════════════════════════════════[/bold green]
-[bold yellow]White Cell - Cybersecurity Assistant[/bold yellow]
-[bold green]═══════════════════════════════════════════════════════════════[/bold green]
+        table = Table(title="White Cell Commands", show_header=True, header_style="bold magenta")
+        table.add_column("Command", style="cyan", no_wrap=True)
+        table.add_column("Description", style="green")
+        table.add_row("help", "Show this help message")
+        table.add_row("status", "Show current command mode, logs, and Groq status")
+        table.add_row("logs", "Display the latest threat detections from JSONL logs")
+        table.add_row("clear", "Exit CRISIS MODE if active")
+        table.add_row("explain <query>", "Optional Groq reasoning (placeholder response)")
+        table.add_row("strategy <threat_type>", "Optional Groq strategy guidance (placeholder response)")
+        table.add_row("exit", "Exit the application")
 
-[bold cyan]Available Commands:[/bold cyan]
-  [yellow]exit[/yellow]                 - Exit the application
-  [yellow]help[/yellow]                 - Show this help message
-  [yellow]status[/yellow]               - Show current system status
-  [yellow]logs[/yellow]                 - Display threat detection logs
-  [yellow]clear[/yellow]                - Clear Command Mode
-  [yellow]explain <query>[/yellow]      - Ask optional Groq reasoning (placeholder response)
-  [yellow]strategy <threat_type>[/yellow] - Ask optional Groq strategy (placeholder response)
-
-[bold cyan]Usage:[/bold cyan]
-  Simply type your query or describe a cybersecurity scenario.
-  The system will:
-  • Detect potential threats using keyword analysis
-  • Calculate risk scores (0-100)
-  • Provide recommended actions
-  • Log all detected threats
-
-[bold cyan]Command Mode:[/bold cyan]
-  When a threat is detected:
-  • The system enters CRISIS MODE
-  • A risk assessment is displayed
-  • Suggested actions are provided
-  • Use 'clear' to exit Command Mode
-  • All threats are logged to logs/threats.jsonl
-
-[bold cyan]Groq Feature Status:[/bold cyan] {self.groq_status_text()}
-
-[bold green]═══════════════════════════════════════════════════════════════[/bold green]
-"""
-        console.print(help_text)
+        console.print(table)
+        console.print(f"[bold cyan]Groq Feature Status:[/bold cyan] {self.groq_status_text()}")
+        console.print("[dim]Tip:[/dim] Type a scenario in plain language to run threat detection.")
 
     def display_status(self) -> None:
         """Display current system status."""
@@ -134,7 +137,7 @@ class WhiteCellCLI:
         logs_table.add_column("POPIA", style="red")
 
         for log in logs[-10:]:  # Show last 10 logs
-            timestamp = log.get("timestamp", "")[-8:]  # Show time only
+            timestamp = self.format_timestamp(log.get("timestamp", ""))
             threat_type = log.get("threat_type", "unknown")
             risk_score = str(log.get("risk_score", 0))
             risk_level = log.get("risk_level", "unknown")
@@ -205,8 +208,13 @@ class WhiteCellCLI:
 
     def start(self) -> None:
         """Start the interactive CLI session."""
-        console.print("[green]───────────── White Cell - Cybersecurity Assistant ──────────────[/green]")
-        console.print("[yellow]Type 'help' for available commands[/yellow]\n")
+        console.print(
+            Panel.fit(
+                "[bold green]White Cell - Cybersecurity Assistant[/bold green]\n"
+                "Type [cyan]help[/cyan] for commands or describe a security incident.",
+                border_style="green",
+            )
+        )
 
         try:
             while self.state.session_active:
@@ -220,11 +228,21 @@ class WhiteCellCLI:
                 command, args = parse_command(user_input)
 
                 # Handle built-in commands
-                if command in ["exit", "help", "status", "logs", "clear", "explain", "strategy"]:
+                if command in BUILTIN_COMMANDS:
                     result = self.handle_command(command, args)
                     if result is False:
                         break
                     continue
+
+                # UX guardrail: suggest likely command typos before threat detection
+                if command and not args:
+                    suggestion = self.suggest_command(command)
+                    if suggestion:
+                        console.print(
+                            f"[yellow]Unknown command:[/yellow] '{command}'. "
+                            f"Did you mean [cyan]{suggestion}[/cyan]?"
+                        )
+                        continue
 
                 # Process as threat detection / reasoning input
                 response = handle_input(user_input)

@@ -41,6 +41,16 @@ class CLIGroqCommandTests(unittest.TestCase):
             status = self.cli.groq_status_text()
         self.assertIn("placeholder responses", status)
 
+    def test_suggest_command_for_typo(self):
+        self.assertEqual(self.cli.suggest_command("stats"), "status")
+        self.assertIsNone(self.cli.suggest_command("completelyunknown"))
+
+    def test_format_timestamp_handles_iso_and_invalid_values(self):
+        formatted = self.cli.format_timestamp("2024-01-01T10:20:30")
+        self.assertEqual(formatted, "2024-01-01 10:20:30")
+        self.assertEqual(self.cli.format_timestamp("not-a-date"), "not-a-date")
+        self.assertEqual(self.cli.format_timestamp(""), "-")
+
 
 if __name__ == "__main__":
     unittest.main()

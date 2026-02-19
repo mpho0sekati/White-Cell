@@ -31,6 +31,12 @@ DEFAULT_CONFIG = {
     "check_interval": 60,  # seconds
     "max_threats": 10,
     "threat_threshold": 50,  # risk score
+    "guardian": {
+        "check_interval": 2.0,
+        "prevention_rate_limit": 3,
+        "window_seconds": 60,
+        "per_agent": {}
+    },
 }
 
 
@@ -190,3 +196,11 @@ def validate_groq_api_key(api_key: str) -> bool:
         return False
     # Groq API keys typically start with 'gsk_' and are fairly long
     return len(api_key.strip()) > 10
+
+
+def get_guardian_config() -> dict:
+    """
+    Return guardian-related configuration (with defaults applied).
+    """
+    config = load_config()
+    return config.get("guardian", DEFAULT_CONFIG.get("guardian", {}))

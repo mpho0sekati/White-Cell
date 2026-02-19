@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any
 
 from whitecell.agent import agent_manager
+from whitecell.config import get_guardian_config
 
 
 class GuardianAgent:
@@ -83,15 +84,23 @@ class GuardianAgent:
 
             now = datetime.now()
             if agent_id:
+                # load per-agent override from config if present
+                guardian_cfg = get_guardian_config()
+                per_agent = guardian_cfg.get('per_agent', {}) or {}
+                agent_policy = per_agent.get(agent_id, {})
+
+                rate_limit = agent_policy.get('prevention_rate_limit', self.prevention_rate_limit)
+                window_seconds = agent_policy.get('window_seconds', self.window_seconds)
+
                 dq = self._prevention_history[agent_id]
                 dq.append(now)
                 # prune old entries
-                cutoff = now - timedelta(seconds=self.window_seconds)
+                cutoff = now - timedelta(seconds=window_seconds)
                 while dq and dq[0] < cutoff:
                     dq.popleft()
 
                 # If rate exceeded, take action
-                if len(dq) > self.prevention_rate_limit:
+                if len(dq) > rate_limit:
                     # pause the offending agent and audit
                     paused = False
                     if agent_id in agent_manager.agents:
@@ -105,6 +114,7 @@ class GuardianAgent:
                         'time': now.isoformat(),
                         'threat_type': threat_type,
                         'action': action,
+                        'used_rate_limit': rate_limit,
                     })
 
         # Other event checks can be added here (e.g., unexpected remediation, repeated failures)
@@ -113,7 +123,26 @@ class GuardianAgent:
         self.audit_log.append(record)
 
 
-def create_and_start_guardian(check_interval: float = 2.0, prevention_rate_limit: int = 3, window_seconds: int = 60) -> GuardianAgent:
+def create_and_start_guardian(check_interval: float | None = None, prevention_rate_limit: int | None = None, window_seconds: int | None = None, use_config: bool = True) -> GuardianAgent:
+    """Create and start a GuardianAgent.
+
+    When `use_config` is True, values missing (None) will be populated from
+    `whitecell.config.get_guardian_config()` allowing centralized policy control.
+    """
+    if use_config:
+        cfg = get_guardian_config() or {}
+        if check_interval is None:
+            check_interval = float(cfg.get("check_interval", 2.0))
+        if prevention_rate_limit is None:
+            prevention_rate_limit = int(cfg.get("prevention_rate_limit", 3))
+        if window_seconds is None:
+            window_seconds = int(cfg.get("window_seconds", 60))
+
+    # Fallback to defaults if still None
+    check_interval = float(check_interval or 2.0)
+    prevention_rate_limit = int(prevention_rate_limit or 3)
+    window_seconds = int(window_seconds or 60)
+
     g = GuardianAgent(check_interval=check_interval, prevention_rate_limit=prevention_rate_limit, window_seconds=window_seconds)
     g.start()
     return g

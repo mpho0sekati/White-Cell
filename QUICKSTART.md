@@ -68,13 +68,13 @@ Displays the last 10 detected threats with risk assessments from JSONL logs.
 ```
 WhiteCell> explain suspicious login from unknown ASN
 ```
-Uses optional Groq reasoning if enabled and configured.
+Uses optional Groq wiring if enabled and configured (currently placeholder responses).
 
 ### Optional Groq Strategy
 ```
 WhiteCell> strategy ransomware
 ```
-Uses optional Groq strategy guidance for a threat type.
+Uses optional Groq strategy wiring for a threat type (currently placeholder responses).
 
 ### Clear Crisis Mode
 ```
@@ -231,7 +231,7 @@ chcp 65001
 - Session state management
 
 ### 🔄 Planned (V1.2+)
-- Groq API integration for AI reasoning
+- Production Groq API integration for real AI reasoning (current commands are placeholders)
 - Machine learning-based detection
 - Custom threat signatures
 - Web dashboard

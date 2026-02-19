@@ -53,8 +53,17 @@ class WhiteCellCLI:
         if not WhiteCellCLI.is_groq_feature_enabled():
             return "DISABLED (set WHITECELL_ENABLE_GROQ=1 to enable commands)"
         if groq_client.is_configured():
-            return "ENABLED (configured)"
+            return "ENABLED (configured, placeholder responses)"
         return "ENABLED (missing GROQ_API_KEY)"
+
+    @staticmethod
+    def persisted_log_count() -> int:
+        """Return count of persisted log entries from JSONL storage."""
+
+        try:
+            return len(get_session_logs())
+        except OSError:
+            return 0
 
     def display_help(self) -> None:
         """Display help information and available commands."""
@@ -69,8 +78,8 @@ class WhiteCellCLI:
   [yellow]status[/yellow]               - Show current system status
   [yellow]logs[/yellow]                 - Display threat detection logs
   [yellow]clear[/yellow]                - Clear Command Mode
-  [yellow]explain <query>[/yellow]      - Ask optional Groq reasoning about a scenario
-  [yellow]strategy <threat_type>[/yellow] - Ask optional Groq response strategy
+  [yellow]explain <query>[/yellow]      - Ask optional Groq reasoning (placeholder response)
+  [yellow]strategy <threat_type>[/yellow] - Ask optional Groq strategy (placeholder response)
 
 [bold cyan]Usage:[/bold cyan]
   Simply type your query or describe a cybersecurity scenario.
@@ -101,7 +110,8 @@ class WhiteCellCLI:
         status_table.add_column("Value", style="green")
 
         status_table.add_row("Command Mode", "[red]ACTIVE[/red]" if self.state.command_mode else "[green]INACTIVE[/green]")
-        status_table.add_row("Session Logs", str(len(self.state.logs)))
+        status_table.add_row("Session Logs (in-memory)", str(len(self.state.logs)))
+        status_table.add_row("Persisted Logs", str(self.persisted_log_count()))
         status_table.add_row("Last Threat", self.state.last_threat.get("threat_type", "None"))
         status_table.add_row("Groq", self.groq_status_text())
 

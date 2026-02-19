@@ -31,6 +31,16 @@ class CLIGroqCommandTests(unittest.TestCase):
         self.assertTrue(result)
         mock_print.assert_called_with("[yellow]Groq commands are disabled by feature flag.[/yellow]")
 
+    @patch("whitecell.cli.get_session_logs", return_value=[{"id": 1}, {"id": 2}, {"id": 3}])
+    def test_persisted_log_count_uses_file_backed_logs(self, _mock_logs):
+        self.assertEqual(self.cli.persisted_log_count(), 3)
+
+    @patch("whitecell.cli.groq_client.is_configured", return_value=True)
+    def test_groq_status_text_marks_placeholder_behavior(self, _mock_configured):
+        with patch.dict(os.environ, {"WHITECELL_ENABLE_GROQ": "1"}):
+            status = self.cli.groq_status_text()
+        self.assertIn("placeholder responses", status)
+
 
 if __name__ == "__main__":
     unittest.main()

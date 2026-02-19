@@ -7,148 +7,112 @@ Detected threats trigger Command Mode activation.
 Author: White Cell Project
 """
 
-from typing import Optional
-from dataclasses import dataclass
+from typing import Optional, List, Dict, Any
+import re
+
+from whitecell.threats_config import THREATS, get_threat_by_type, ThreatDefinition
 
 
-@dataclass
-class ThreatSignature:
+def _token_matches(text: str, keyword: str) -> bool:
+    """Return True if keyword matches as a token or phrase within text."""
+    # escape keyword for regex and use word boundaries when appropriate
+    kw_escaped = re.escape(keyword)
+    pattern = rf"\b{kw_escaped}\b"
+    return re.search(pattern, text, flags=re.IGNORECASE) is not None
+
+
+def detect_threats(user_input: str) -> List[Dict[str, Any]]:
     """
-    Represents a threat signature with keywords and severity level.
+    Detect threats in input and return all matching signatures with confidence scores.
 
-    Attributes:
-        threat_type: Name of the threat (e.g., 'ransomware')
-        keywords: List of keywords that trigger this threat
-        default_severity: Default severity level (1-10)
-        description: Detailed description of the threat type
+    Returns a list of matches sorted by confidence (desc). Each match contains:
+      - threat_type
+      - keywords_matched: list[str]
+      - regex_matched: list[str]
+      - confidence: 0.0-1.0
+      - severity: default severity from definition
     """
-    threat_type: str
-    keywords: list[str]
-    default_severity: int
-    description: str = ""
+    normalized = user_input
+    matches: List[Dict[str, Any]] = []
 
+    for td in THREATS:
+        total_weight = sum(td.keyword_weights.values()) if td.keyword_weights else 0.0
+        matched_weight = 0.0
+        matched_keywords: List[str] = []
+        matched_regex: List[str] = []
 
-# Collection of known threat signatures
-THREAT_SIGNATURES = [
-    ThreatSignature("ransomware", ["ransomware", "encrypt", "locked", "pay", "bitcoin"], 9, 
-                   "Malicious software that encrypts files and demands ransom"),
-    ThreatSignature("malware", ["malware", "virus", "trojan", "worm", "spyware"], 8,
-                   "Malicious software designed to harm or exploit systems"),
-    ThreatSignature("data_breach", ["breach", "exposed", "compromised", "leaked", "stolen"], 8,
-                   "Unauthorized access or disclosure of sensitive data"),
-    ThreatSignature("phishing", ["phishing", "suspicious link", "verify credentials", "click here", "urgent action"], 6,
-                   "Social engineering attack attempting to steal credentials"),
-    ThreatSignature("exploit", ["exploit", "vulnerability", "rce", "sql injection", "xss", "zero-day"], 7,
-                   "Attack targeting software vulnerabilities"),
-    ThreatSignature("lateral_movement", ["lateral movement", "privilege escalation", "pivot", "access granted"], 7,
-                   "Attacker moving through network after initial breach"),
-    ThreatSignature("denial_of_service", ["ddos", "dos attack", "flood", "overload", "offline"], 7,
-                   "Attack designed to make systems unavailable"),
-    ThreatSignature("credential_theft", ["credentials stolen", "password compromised", "account takeover"], 7,
-                   "Unauthorized access to user accounts and credentials"),
-    ThreatSignature("supply_chain", ["supply chain", "compromised vendor", "third party"], 8,
-                   "Attack through compromised third-party providers"),
-]
+        # keyword matching with token boundaries
+        for kw, w in td.keyword_weights.items():
+            if _token_matches(normalized, kw):
+                matched_weight += w
+                matched_keywords.append(kw)
 
-# Map threat types to risk categories for financial impact
-THREAT_FINANCIAL_IMPACT = {
-    "ransomware": 5000,
-    "malware": 3000,
-    "data_breach": 10000,
-    "phishing": 1000,
-    "exploit": 4000,
-    "lateral_movement": 5000,
-    "denial_of_service": 2000,
-    "credential_theft": 6000,
-    "supply_chain": 8000,
-}
+        # regex pattern matches
+        for pat in (td.regex_patterns or []):
+            if pat.search(normalized):
+                matched_regex.append(pat.pattern)
+                # boost matched weight for regex matches
+                matched_weight += 1.5
 
-# Map threat types to POPIA (Protection of Personal Information Act) exposure
-# True if the threat could expose personal data
-THREAT_POPIA_EXPOSURE = {
-    "ransomware": True,
-    "malware": True,
-    "data_breach": True,
-    "phishing": True,
-    "exploit": True,
-    "lateral_movement": True,
-    "denial_of_service": False,
-    "credential_theft": True,
-    "supply_chain": True,
-}
+        if matched_weight > 0 and total_weight > 0:
+            confidence = min(1.0, matched_weight / max(total_weight, 1.0))
+        elif matched_regex:
+            confidence = 0.6 + min(0.4, len(matched_regex) * 0.1)
+        else:
+            confidence = 0.0
+
+        if confidence > 0:
+            matches.append({
+                "threat_type": td.threat_type,
+                "keywords_matched": matched_keywords,
+                "regex_matched": matched_regex,
+                "confidence": round(confidence, 3),
+                "severity": td.default_severity,
+            })
+
+    # sort by confidence desc
+    matches.sort(key=lambda x: x["confidence"], reverse=True)
+    return matches
 
 
 def detect_threat(user_input: str) -> Optional[dict]:
     """
-    Detect if the user input contains keywords indicating a cybersecurity threat.
+    Backwards-compatible helper returning the top match or None.
 
-    Args:
-        user_input: The user's input string
-
-    Returns:
-        A dictionary with threat details (threat_type, keywords_matched, severity)
-        or None if no threat is detected
+    Use `detect_threats` to get all matches and confidences.
     """
-    normalized_input = user_input.lower()
-
-    for signature in THREAT_SIGNATURES:
-        for keyword in signature.keywords:
-            if keyword.lower() in normalized_input:
-                return {
-                    "threat_type": signature.threat_type,
-                    "keywords_matched": keyword,
-                    "severity": signature.default_severity,
-                }
-
-    return None
-
-
-def get_threat_context(threat_type: str) -> dict:
-    """
-    Get additional context for a detected threat.
-
-    Args:
-        threat_type: The type of threat detected
-
-    Returns:
-        Dictionary with financial impact and POPIA exposure information
-    """
+    matches = detect_threats(user_input)
+    if not matches:
+        return None
+    top = matches[0]
     return {
-        "financial_impact": THREAT_FINANCIAL_IMPACT.get(threat_type, 2000),
-        "popia_exposure": THREAT_POPIA_EXPOSURE.get(threat_type, False),
+        "threat_type": top["threat_type"],
+        "keywords_matched": top.get("keywords_matched", []),
+        "confidence": top.get("confidence", 0.0),
+        "severity": top.get("severity", 5),
     }
 
 
+def get_threat_context(threat_type: str) -> dict:
+    td = get_threat_by_type(threat_type)
+    if not td:
+        return {"financial_impact": 2000, "popia_exposure": False}
+    return {"financial_impact": td.financial_impact, "popia_exposure": td.popia_exposure}
+
+
 def get_threat_description(threat_type: str) -> str:
-    """
-    Get the description for a threat type.
-
-    Args:
-        threat_type: The type of threat
-
-    Returns:
-        Threat description string
-    """
-    for sig in THREAT_SIGNATURES:
-        if sig.threat_type == threat_type:
-            return sig.description
-    return "Unknown threat type"
+    td = get_threat_by_type(threat_type)
+    return td.description if td else "Unknown threat type"
 
 
 def get_all_threats() -> list[dict]:
-    """
-    Get all available threat types with their details.
-
-    Returns:
-        List of dictionaries with threat information
-    """
-    threats = []
-    for sig in THREAT_SIGNATURES:
-        threats.append({
-            "threat_type": sig.threat_type,
-            "severity": sig.default_severity,
-            "description": sig.description,
-            "financial_impact": THREAT_FINANCIAL_IMPACT.get(sig.threat_type, 2000),
-            "popia_exposure": THREAT_POPIA_EXPOSURE.get(sig.threat_type, False),
+    out = []
+    for td in THREATS:
+        out.append({
+            "threat_type": td.threat_type,
+            "severity": td.default_severity,
+            "description": td.description,
+            "financial_impact": td.financial_impact,
+            "popia_exposure": td.popia_exposure,
         })
-    return threats
+    return out

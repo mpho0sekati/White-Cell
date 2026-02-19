@@ -418,9 +418,17 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
     def deploy_agent_interactive(self) -> None:
         """Interactive agent deployment."""
         console.print("\n[bold cyan]═ DEPLOY NEW AGENT ═[/bold cyan]")
+        console.print("[dim](Type 'cancel' to go back)[/dim]\n")
         
         agent_id = Prompt.ask("[cyan]Agent name[/cyan]", default="monitor-1")
+        if agent_id.lower() == 'cancel':
+            console.print("[yellow]Cancelled[/yellow]")
+            return
+        
         interval = Prompt.ask("[cyan]Check interval (seconds)[/cyan]", default="60")
+        if interval.lower() == 'cancel':
+            console.print("[yellow]Cancelled[/yellow]")
+            return
         
         try:
             interval = int(interval)
@@ -438,12 +446,20 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
                 console.print("[red]✗ Failed to start agent[/red]")
         except ValueError:
             console.print("[red]Invalid interval value[/red]")
+        
+        console.print("\n[dim]Press Enter to return to main menu...[/dim]")
+        input()
 
     def export_logs_interactive(self) -> None:
         """Interactive log export."""
         console.print("\n[bold cyan]═ EXPORT LOGS ═[/bold cyan]")
+        console.print("[dim](Type 'cancel' to go back)[/dim]\n")
         
         format_choice = Prompt.ask("[cyan]Export format[/cyan]", choices=["csv", "json"], default="csv")
+        
+        if format_choice.lower() == 'cancel':
+            console.print("[yellow]Cancelled[/yellow]")
+            return
         
         logs = get_session_logs()
         
@@ -469,11 +485,15 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             console.print(f"[green]✓ Exported {len(logs)} logs to {filename}[/green]")
         except Exception as e:
             console.print(f"[red]✗ Export failed: {e}[/red]")
+        
+        console.print("\n[dim]Press Enter to return to main menu...[/dim]")
+        input()
 
     def configure_groq_api(self) -> None:
         """Interactive GROQ configuration."""
         console.print("\n[bold cyan]═ GROQ API CONFIGURATION ═[/bold cyan]")
-        console.print("[dim]Get your free API key: https://console.groq.com/keys[/dim]\n")
+        console.print("[dim]Get your free API key: https://console.groq.com/keys[/dim]")
+        console.print("[dim](Type 'cancel' to go back)[/dim]\n")
         
         current_key = get_groq_api_key()
         
@@ -484,7 +504,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         
         api_key = Prompt.ask("[cyan]Enter your GROQ API key[/cyan]", password=True)
         
-        if not api_key:
+        if not api_key or api_key.lower() == 'cancel':
             console.print("[yellow]Cancelled[/yellow]")
             return
         
@@ -502,6 +522,9 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
                 console.print("[yellow]⚠ API key saved but client not yet initialized. Check your connection.[/yellow]")
         else:
             console.print("[red]✗ Failed to save API key[/red]")
+        
+        console.print("\n[dim]Press Enter to return to main menu...[/dim]")
+        input()
 
     def show_suggestion(self, context: str) -> None:
         """Show context-aware suggestion."""

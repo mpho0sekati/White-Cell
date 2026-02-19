@@ -8,10 +8,12 @@ Provides actionable recommendations based on threat severity.
 Author: White Cell Project
 """
 
-from typing import Literal
+from typing import Literal, Dict, Any
+
+from whitecell.threats_config import get_threat_by_type
 
 
-# Mitigation strategies for each threat type
+# Mitigation strategies for each threat type (unchanged)
 THREAT_MITIGATIONS = {
     "ransomware": [
         "Conduct immediate backup verification (test recovery)",
@@ -88,45 +90,24 @@ THREAT_MITIGATIONS = {
 }
 
 
-def calculate_risk(threat_info: dict) -> dict:
+def calculate_risk(threat_info: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Calculate the risk score for a detected threat.
+    Calculate the risk score for a detected threat using centralized metadata.
 
-    Args:
-        threat_info: Dictionary containing threat details including:
-            - threat_type: Type of threat (e.g., 'ransomware')
-            - severity: Severity level (1-10)
-            - keywords_matched: Keyword that triggered detection
-
-    Returns:
-        Dictionary containing:
-            - risk_score: Integer between 0-100
-            - risk_level: String ('low', 'medium', 'high')
-            - estimated_financial_loss: Estimated financial impact in dollars
-            - popia_exposure: Boolean indicating if personal data may be exposed
-            - recommendation: String with recommended action
+    Accepts either the legacy single-match dict or a match returned by
+    `detection.detect_threats` / `detect_threat`.
     """
     threat_type = threat_info.get("threat_type", "unknown")
-    severity = threat_info.get("severity", 5)
+    severity = threat_info.get("severity", threat_info.get("severity", 5))
 
-    # Normalize severity to 0-10 range
-    severity = max(1, min(10, severity))
+    # Normalize severity to 1-10
+    severity = max(1, min(10, int(severity)))
 
-    # Calculate base risk score from severity (0-100)
     base_risk_score = severity * 10
 
-    # Adjust risk based on threat type
-    threat_multipliers = {
-        "ransomware": 1.2,
-        "malware": 1.1,
-        "data_breach": 1.15,
-        "phishing": 0.8,
-        "exploit": 1.1,
-        "lateral_movement": 1.15,
-        "denial_of_service": 0.9,
-    }
+    td = get_threat_by_type(threat_type)
+    multiplier = td.risk_multiplier if td else 1.0
 
-    multiplier = threat_multipliers.get(threat_type, 1.0)
     adjusted_risk_score = int(base_risk_score * multiplier)
     adjusted_risk_score = max(0, min(100, adjusted_risk_score))
 
@@ -138,30 +119,20 @@ def calculate_risk(threat_info: dict) -> dict:
     else:
         risk_level = "high"
 
-    # Calculate estimated financial loss
-    base_financial_loss = {
-        "ransomware": 5000,
-        "malware": 3000,
-        "data_breach": 10000,
-        "phishing": 1000,
-        "exploit": 4000,
-        "lateral_movement": 5000,
-        "denial_of_service": 2000,
-    }
-    financial_loss = base_financial_loss.get(threat_type, 2000)
-
-    # Adjust financial loss by risk score
+    # Financial loss - use centralized baseline
+    financial_loss = td.financial_impact if td else 2000
     adjusted_financial_loss = int(financial_loss * (adjusted_risk_score / 50))
 
-    # Determine POPIA exposure
-    popia_exposure = threat_type in ["ransomware", "malware", "data_breach", "phishing", "exploit", "lateral_movement"]
+    # POPIA exposure from central config
+    popia_exposure = td.popia_exposure if td else False
 
-    # Generate recommendation
+    # Recommendations
     recommendations = {
         "low": "Monitor the situation and maintain elevated alertness.",
         "medium": "Increase logging and monitoring. Prepare incident response procedures.",
         "high": "IMMEDIATE ACTION: Isolate affected systems, activate incident response team.",
     }
+
     recommendation = recommendations.get(risk_level, "Unknown risk level")
 
     return {

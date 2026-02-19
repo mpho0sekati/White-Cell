@@ -10,7 +10,8 @@
 
 1. **Navigate to project directory:**
    ```bash
-   cd c:\Users\Admin\whitecell_project
+   # From your shell, change to the project root (where README.md lives)
+   cd /path/to/whitecell_project
    ```
 
 2. **Create/activate virtual environment (if not already done):**
@@ -132,10 +133,8 @@ WhiteCell> How can I improve my password security?
 
 ## Log File Location
 
-Threat logs are automatically saved to:
-```
-c:\Users\Admin\whitecell_project\logs\threats.json
-```
+Threat logs are automatically saved to the `logs/` directory in the project root (for example `logs/threats.json`).
+The application will create the `logs/` folder if it does not already exist.
 
 Each log entry contains:
 - Timestamp (ISO format)

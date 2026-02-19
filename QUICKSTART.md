@@ -1,237 +1,134 @@
-# White Cell V1.1 - Quick Start Guide
+# White Cell Quickstart
 
-## Installation
+## 1. Setup
 
-### Prerequisites
-- Python 3.10 or higher
-- pip package manager
+```bash
+cd /path/to/whitecell_project
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-### Setup Steps
+## 2. Run
 
-1. **Navigate to project directory:**
-   ```bash
-   # From your shell, change to the project root (where README.md lives)
-   cd /path/to/whitecell_project
-   ```
-
-2. **Create/activate virtual environment (if not already done):**
-   ```bash
-   # On Windows
-   venv\Scripts\activate
-   
-   # Or create new venv
-   python -m venv venv
-   venv\Scripts\activate
-   ```
-
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-## Running White Cell
-
-### Basic Usage
 ```bash
 python main.py
 ```
 
-### Production Run
-```bash
-python main.py
+## 3. First Commands
+
+```text
+help
+status
+peek
+dashboard
 ```
 
-## Interactive Commands
+## 4. SOC Workflow (Primary)
 
-Once inside the CLI:
+### Step A: Triage
 
-### Quick Reference with Aliases
-```
-h/? - help              st - status           l - logs              t - threats
-a - analyze             e - export            s - search            c - clear
-q - exit
+```text
+triage suspicious powershell downloading payload
 ```
 
-### Core Commands
-```
-WhiteCell> help                 # Show all commands
-WhiteCell> exit                 # Exit application
-WhiteCell> status               # Show system status
-WhiteCell> clear                # Clear Command Mode
-```
+### Step B: Investigate
 
-### Threat Management
-```
-WhiteCell> threats              # View all threat types with descriptions
-WhiteCell> logs                 # Display last 10 threat logs
-WhiteCell> logs 20              # Display last 20 threat logs
-WhiteCell> search ransomware    # Find all ransomware threats
-WhiteCell> search phishing      # Find all phishing threats
-WhiteCell> analyze ransomware   # Get detailed analysis of ransomware
-WhiteCell> analyze phishing     # Get detailed analysis of phishing
-WhiteCell> export csv           # Export logs as CSV file
-WhiteCell> export json          # Export logs as JSON file
+```text
+investigate malware
+investigate 0
 ```
 
-### Using Aliases (Faster!)
-```
-WhiteCell> h                    # Same as 'help'
-WhiteCell> st                   # Same as 'status'
-WhiteCell> l 15                 # Show last 15 logs
-WhiteCell> t                    # Show threat types
-WhiteCell> a malware            # Analyze malware threats
-WhiteCell> s data_breach        # Search for data breach incidents
-WhiteCell> e csv                # Export as CSV
-WhiteCell> c                    # Clear command mode
-WhiteCell> q                    # Quit application
+### Step C: Respond
+
+```text
+respond recommend possible credential theft on finance host
+respond execute block_ip 10.0.0.8
 ```
 
-## Example Scenarios
+### One-command chain
 
-### Scenario 1: Ransomware Detected
-```
-WhiteCell> We have a ransomware attack on our main server!
-
-━━━━━━━━━━━━━━━ THREAT DETECTED ━━━━━━━━━━━━━━━
-Threat Type: RANSOMWARE
-Trigger: "ransomware"
-Risk Level: HIGH (100/100)
-━━━━━━━━━ COMMAND MODE ACTIVE ━━━━━━━━━━
-
-Suggested Actions:
-• IMMEDIATELY isolate affected systems from the network
-• Activate incident response team
-• Contact cybersecurity experts
-• Begin forensic data collection
-• Notify management and legal if data breach suspected
-• Preserve evidence for investigation
+```text
+soc run suspicious powershell downloading payload
+soc run suspicious powershell downloading payload --execute block_ip 10.0.0.8
 ```
 
-### Scenario 2: Phishing Email
-```
-WhiteCell> Got a suspicious phishing email asking to verify credentials
+## 5. Governance and Access Control
 
-━━━━━━━━━━━━━━━ THREAT DETECTED ━━━━━━━━━━━━━━━
-Threat Type: PHISHING
-Trigger: "phishing"
-Risk Level: MEDIUM (48/100)
-━━━━━━━━━ COMMAND MODE ACTIVE ━━━━━━━━━━
+### Check status
 
-Suggested Actions:
-• Enable enhanced logging and monitoring
-• Prepare incident response procedures
-• Alert security team
-• Isolate potentially affected systems if necessary
+```text
+governance status
 ```
 
-### Scenario 3: Safe Query
-```
-WhiteCell> How can I improve my password security?
+### Set role
 
-[cyan]You said:[/cyan] How can I improve my password security?
-```
-
-## Log File Location
-
-Threat logs are automatically saved to the `logs/` directory in the project root (for example `logs/threats.json`).
-The application will create the `logs/` folder if it does not already exist.
-
-Each log entry contains:
-- Timestamp (ISO format)
-- Threat type
-- Triggered keyword
-- Original user input
-- Risk score (0-100)
-- Risk level (low/medium/high)
-- Estimated financial loss
-- POPIA exposure status
-
-## Risk Score Interpretation
-
-| Range | Level | Color | Action |
-|-------|-------|-------|--------|
-| 0-33 | Low | Green | Monitor and document |
-| 34-66 | Medium | Yellow | Increase logging, prepare procedures |
-| 67-100 | High | Red | Immediate action required |
-
-## Supported Threat Types
-
-1. **Ransomware** - File encryption/system lockdown attacks
-2. **Malware** - Malicious software including viruses, trojans, worms
-3. **Data Breach** - Unauthorized data access or exfiltration
-4. **Phishing** - Social engineering attacks via email/links
-5. **Exploit** - Zero-day or known vulnerability exploitation
-6. **Lateral Movement** - Privilege escalation and network traversal
-7. **Denial of Service** - DDoS and resource exhaustion attacks
-
-## Environment Variables
-
-To use Groq AI features (future), set:
-```bash
-set GROQ_API_KEY=your_api_key_here
+```text
+governance role admin
+governance role analyst
+governance role viewer
 ```
 
-## Troubleshooting
+### Manage approval policy
 
-### Import Errors
-Ensure all dependencies are installed:
+```text
+governance policy add respond.block_ip
+governance policy remove respond.block_ip
+```
+
+### Process approvals
+
+```text
+governance approvals list
+governance approvals approve <id>
+governance approvals reject <id>
+```
+
+## 6. Website Analysis (Ethical and Controlled)
+
+```text
+scan allowlist add example.com
+scan website https://example.com
+scan website https://example.com --active
+```
+
+Notes:
+- Active probing is blocked unless allowlisted.
+- Governance policy may require approval for active probing.
+
+## 7. AI Enablement
+
+```text
+agent configure
+agent ask summarize this incident pattern
+agent blue defend against ransomware in small enterprise
+agent red authorized simulation of phishing campaign controls
+agent crewai produce incident response playbook draft
+```
+
+## 8. Logs and Export
+
+```text
+logs 20
+export csv
+export json
+```
+
+Log files:
+- `logs/threats.json`
+- `logs/audit.jsonl`
+- `logs/approvals.json`
+
+## 9. Troubleshooting
+
+### Dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### Logging Directory Not Created
-The `logs/` directory is created automatically. If it fails, create manually:
+### Run tests
+
 ```bash
-mkdir logs
+venv\Scripts\python -m pytest -q tests
 ```
-
-### Unicode Display Issues
-Update Python and ensure terminal supports UTF-8:
-```bash
-# Check Python version
-python --version
-
-# On Windows, set code page to UTF-8
-chcp 65001
-```
-
-## Features Overview
-
-### ✅ Implemented (V1.1)
-- Deterministic threat detection
-- Risk scoring (0-100 scale)
-- Financial loss estimation
-- POPIA exposure detection
-- Command Mode with suggested actions
-- Rich terminal formatting
-- Threat logging to JSON
-- Interactive CLI with help system
-- Session state management
-
-### 🔄 Planned (Next)
-- Machine learning-based detection
-- Custom threat signatures
-- Web dashboard
-- Webhook notifications
-- SIEM integration
-- Automated response playbooks
-- Multi-user sessions
-- Compliance reporting
-
-## Performance Notes
-
-- Threat detection: < 1ms per query
-- Risk scoring: < 5ms per threat
-- Log writing: < 50ms (depends on disk I/O)
-- CLI startup: < 500ms
-
-## Support & Documentation
-
-- See `V1_1_IMPLEMENTATION.md` for full feature documentation
-- See `README.md` for project overview
-- Use `python main.py` and `help` in CLI for live command examples
-
-## License & Attribution
-
-White Cell Project - Cybersecurity Assistant
-Built for educational and enterprise security purposes.

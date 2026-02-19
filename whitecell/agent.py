@@ -21,6 +21,7 @@ from whitecell.risk import calculate_risk, get_threat_mitigations
 from whitecell.security_checks import run_all_checks, get_check_by_name
 from whitecell.config import load_config, get_config_value
 from whitecell.groq_client import groq_client
+from whitecell.agent_learning import agent_learning
 
 
 class TaskStatus(str, Enum):
@@ -205,6 +206,20 @@ class Agent:
             # Call callback if registered
             if self.on_task_completed:
                 self.on_task_completed(task)
+
+            # Record interaction for learning system
+            try:
+                agent_learning.record_interaction(
+                    agent_id=self.agent_id,
+                    task_type=task.task_type,
+                    task_description=task.description,
+                    outcome=str(task.result or task.error or "No output"),
+                    success=task.status == TaskStatus.COMPLETED,
+                    threat_type=task.parameters.get("threat_type"),
+                    metadata={"task_id": task.task_id, "parameters": task.parameters}
+                )
+            except Exception as e:
+                pass  # Don't fail if learning capture fails
 
     def _task_run_check(self, task: Task) -> Dict[str, Any]:
         """Execute a specific security check."""
@@ -608,6 +623,21 @@ class AgentManager:
             return self.agents[agent_id].stop()
         return False
 
+    def remove_agent(self, agent_id: str) -> bool:
+        """
+        Stop and remove an agent from the manager.
+
+        Returns True if removed, False otherwise.
+        """
+        if agent_id in self.agents:
+            try:
+                self.agents[agent_id].stop()
+            except Exception:
+                pass
+            del self.agents[agent_id]
+            return True
+        return False
+
     def stop_all_agents(self) -> int:
         """
         Stop all agents.
@@ -792,6 +822,48 @@ class AgentManager:
         except Exception as e:
             print(f"Export failed: {e}")
             return False
+
+    def get_learned_techniques(self, threat_type: str) -> List[Dict[str, Any]]:
+        """Get techniques the system has learned for a threat type.
+        
+        Args:
+            threat_type: Type of threat
+            
+        Returns:
+            List of effective techniques ranked by effectiveness
+        """
+        return agent_learning.get_techniques_for_threat(threat_type)
+
+    def get_learned_rules(self) -> List[Dict[str, Any]]:
+        """Extract and return learned decision rules.
+        
+        Returns:
+            List of learned rules with confidence scores
+        """
+        return agent_learning.extract_learned_rules()
+
+    def get_recommendation_for_threat(self, threat_type: str, task_type: str = "remediate") -> Optional[Dict[str, Any]]:
+        """Get AI-powered recommendation based on what we've learned.
+        
+        Args:
+            threat_type: Type of threat to handle
+            task_type: Type of task to perform
+            
+        Returns:
+            Recommendation with suggested techniques
+        """
+        return agent_learning.get_recommendation(threat_type, task_type)
+
+    def get_learning_summary(self, agent_id: Optional[str] = None) -> str:
+        """Get a summary of what the system has learned.
+        
+        Args:
+            agent_id: Optional - filter by specific agent
+            
+        Returns:
+            Formatted summary string
+        """
+        return agent_learning.get_conversation_summary(agent_id)
 
 
 # Global agent manager instance

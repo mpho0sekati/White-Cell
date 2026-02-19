@@ -15,6 +15,10 @@ from typing import Dict, Any
 
 from whitecell.agent import agent_manager
 from whitecell.config import get_guardian_config
+from whitecell.groq_client import groq_client
+
+# Module-level guardian instance
+guardian_instance: GuardianAgent | None = None
 
 
 class GuardianAgent:
@@ -99,15 +103,36 @@ class GuardianAgent:
                 while dq and dq[0] < cutoff:
                     dq.popleft()
 
-                # If rate exceeded, take action
-                if len(dq) > rate_limit:
+                # Optional model-based scoring
+                model_pause = False
+                try:
+                    cfg = get_guardian_config() or {}
+                    use_model = bool(cfg.get("use_model_scoring", False))
+                    model_threshold = int(cfg.get("model_confidence_threshold", 80))
+                except Exception:
+                    use_model = False
+                    model_threshold = 80
+
+                if use_model and groq_client.is_configured():
+                    try:
+                        text = f"Agent {agent_id} action: {action} on threat {threat_type}"
+                        analysis = groq_client.analyze_threat(text, indicators=[threat_type] if threat_type else None)
+                        if isinstance(analysis, dict):
+                            conf = int(analysis.get("confidence", 0))
+                            should = bool(analysis.get("should_prevent", False))
+                            model_pause = should and conf >= model_threshold
+                    except Exception:
+                        model_pause = False
+
+                # If rate exceeded or model suggests pause, take action
+                if len(dq) > rate_limit or model_pause:
                     # pause the offending agent and audit
                     paused = False
                     if agent_id in agent_manager.agents:
                         paused = agent_manager.stop_agent(agent_id)
                     self._audit({
                         'level': 'warning',
-                        'message': 'Prevention rate limit exceeded',
+                        'message': 'Prevention rate limit exceeded or model flagged agent',
                         'agent_id': agent_id,
                         'count': len(dq),
                         'paused': paused,
@@ -115,6 +140,7 @@ class GuardianAgent:
                         'threat_type': threat_type,
                         'action': action,
                         'used_rate_limit': rate_limit,
+                        'model_pause': model_pause,
                     })
 
         # Other event checks can be added here (e.g., unexpected remediation, repeated failures)
@@ -146,3 +172,39 @@ def create_and_start_guardian(check_interval: float | None = None, prevention_ra
     g = GuardianAgent(check_interval=check_interval, prevention_rate_limit=prevention_rate_limit, window_seconds=window_seconds)
     g.start()
     return g
+
+
+def start_guardian_from_config() -> GuardianAgent:
+    """Start the global guardian instance from config and return it."""
+    global guardian_instance
+    if guardian_instance and guardian_instance._running:
+        return guardian_instance
+    cfg = get_guardian_config() or {}
+    guardian_instance = create_and_start_guardian(
+        check_interval=cfg.get("check_interval"),
+        prevention_rate_limit=cfg.get("prevention_rate_limit"),
+        window_seconds=cfg.get("window_seconds"),
+        use_config=False,
+    )
+    return guardian_instance
+
+
+def stop_guardian() -> bool:
+    """Stop the global guardian instance if running."""
+    global guardian_instance
+    if not guardian_instance:
+        return False
+    guardian_instance.stop()
+    guardian_instance = None
+    return True
+
+
+def get_guardian_status() -> dict:
+    """Return status information about the global guardian instance."""
+    if not guardian_instance:
+        return {"running": False}
+    return {
+        "running": guardian_instance._running,
+        "audit_log_count": len(guardian_instance.audit_log),
+        "prevention_history_agents": list(guardian_instance._prevention_history.keys()),
+    }

@@ -49,3 +49,5 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+# Prevent accidental nested repo clones in workspace root
+White-Cell/

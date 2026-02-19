@@ -384,10 +384,10 @@ Prevented: {stats['total_prevented']}
 
 ## Testing
 
-### Run Demo
+### Run System
 
 ```bash
-python demo_agent_system.py
+python main.py
 ```
 
 Shows:
@@ -406,8 +406,8 @@ Shows:
 # Quick test
 python -c "from whitecell.agent import agent_manager; print('OK')"
 
-# Full test
-python demo_agent_system.py
+# Full run
+python main.py
 ```
 
 ## Performance
@@ -432,7 +432,6 @@ python demo_agent_system.py
 ```
 White-Cell/
 ├── main.py                      # CLI entry point
-├── demo_agent_system.py         # Agent system demo
 ├── AGENT_SYSTEM.md              # Agent documentation
 ├── README.md                    # This file
 ├── requirements.txt             # Python dependencies
@@ -507,7 +506,6 @@ White Cell is released under the MIT License.
 
 - **Documentation**: See AGENT_SYSTEM.md
 - **Issues**: GitHub Issues
-- **Examples**: demo_agent_system.py
 - **API Docs**: Code comments and docstrings
 
 ## Version History

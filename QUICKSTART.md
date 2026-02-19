@@ -36,9 +36,9 @@
 python main.py
 ```
 
-### Demo All V1.1 Features
+### Production Run
 ```bash
-python demo_v1_1.py
+python main.py
 ```
 
 ## Interactive Commands
@@ -208,8 +208,7 @@ chcp 65001
 - Interactive CLI with help system
 - Session state management
 
-### 🔄 Planned (V1.2+)
-- Groq API integration for AI reasoning
+### 🔄 Planned (Next)
 - Machine learning-based detection
 - Custom threat signatures
 - Web dashboard
@@ -230,7 +229,7 @@ chcp 65001
 
 - See `V1_1_IMPLEMENTATION.md` for full feature documentation
 - See `README.md` for project overview
-- See `demo_v1_1.py` for code examples
+- Use `python main.py` and `help` in CLI for live command examples
 
 ## License & Attribution
 

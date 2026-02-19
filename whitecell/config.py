@@ -35,6 +35,16 @@ DEFAULT_CONFIG = {
     "check_interval": 60,  # seconds
     "max_threats": 10,
     "threat_threshold": 50,  # risk score
+    "scan_allowlist": [],  # domains authorized for active website probing
+    "governance": {
+        "role": "admin",
+        "approval_required_actions": [
+            "scan.website.active",
+            "respond.block_ip",
+            "respond.disable_user",
+            "agent.evolve.apply",
+        ],
+    },
     "guardian": {
         "check_interval": 2.0,
         "prevention_rate_limit": 3,
@@ -122,6 +132,8 @@ def set_groq_api_key(api_key: str) -> bool:
     config["groq_api_key"] = api_key
     config["groq_api_key_hash"] = hash_api_key(api_key)
     config["groq_api_configured"] = True
+    # Keep key available for current process and downstream frameworks.
+    os.environ["GROQ_API_KEY"] = api_key
     return save_config(config)
 
 
@@ -237,3 +249,85 @@ def get_guardian_config() -> dict:
     """
     config = load_config()
     return config.get("guardian", DEFAULT_CONFIG.get("guardian", {}))
+
+
+def get_scan_allowlist() -> list[str]:
+    """
+    Return configured allowlist of domains authorized for active probing.
+    """
+    config = load_config()
+    allowlist = config.get("scan_allowlist", DEFAULT_CONFIG.get("scan_allowlist", []))
+    return allowlist if isinstance(allowlist, list) else []
+
+
+def set_scan_allowlist(domains: list[str]) -> bool:
+    """
+    Persist scan allowlist domains for active probing authorization.
+    """
+    config = load_config()
+    config["scan_allowlist"] = domains
+    return save_config(config)
+
+
+def get_governance_config() -> dict:
+    """
+    Return governance configuration with defaults applied.
+    """
+    config = load_config()
+    default_gov = DEFAULT_CONFIG.get("governance", {})
+    current = config.get("governance", {})
+    if not isinstance(current, dict):
+        current = {}
+    merged = {**default_gov, **current}
+    required = merged.get("approval_required_actions", [])
+    if not isinstance(required, list):
+        merged["approval_required_actions"] = list(default_gov.get("approval_required_actions", []))
+    return merged
+
+
+def get_governance_role() -> str:
+    """
+    Return current operator role (admin/analyst/viewer).
+    """
+    role = str(get_governance_config().get("role", "admin")).lower().strip()
+    if role not in {"admin", "analyst", "viewer"}:
+        return "admin"
+    return role
+
+
+def set_governance_role(role: str) -> bool:
+    """
+    Persist operator role for governance controls.
+    """
+    normalized = str(role or "").lower().strip()
+    if normalized not in {"admin", "analyst", "viewer"}:
+        return False
+    config = load_config()
+    gov = config.get("governance", {})
+    if not isinstance(gov, dict):
+        gov = {}
+    gov["role"] = normalized
+    config["governance"] = gov
+    return save_config(config)
+
+
+def get_approval_required_actions() -> list[str]:
+    """
+    Return actions that require explicit approval before execution.
+    """
+    actions = get_governance_config().get("approval_required_actions", [])
+    return [str(a).strip() for a in actions if str(a).strip()]
+
+
+def set_approval_required_actions(actions: list[str]) -> bool:
+    """
+    Persist actions that require approval before execution.
+    """
+    normalized = sorted(set(str(a).strip() for a in actions if str(a).strip()))
+    config = load_config()
+    gov = config.get("governance", {})
+    if not isinstance(gov, dict):
+        gov = {}
+    gov["approval_required_actions"] = normalized
+    config["governance"] = gov
+    return save_config(config)

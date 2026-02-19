@@ -37,25 +37,38 @@ class GroqClient:
         """
         # Try to load API key in order of priority:
         # 1. Provided argument
-        # 2. Environment variable
-        # 3. Persistent configuration
-        self.api_key = api_key or os.getenv("GROQ_API_KEY")
-        
-        if not self.api_key:
-            try:
-                # Late import to avoid circular dependency
-                from whitecell.config import get_groq_api_key
-                self.api_key = get_groq_api_key()
-            except (ImportError, Exception) as e:
-                logger.debug(f"Could not load API key from config: {e}")
-                self.api_key = None
+        # 2. Persistent configuration
+        # 3. Environment variable
+        self.api_key = api_key or self._resolve_preferred_api_key()
         
         self.model = "mixtral-8x7b-32768"  # Default Groq model
         self.client = None
         self._initialize_client()
 
+    def _resolve_preferred_api_key(self) -> Optional[str]:
+        """Resolve preferred key source (config first, env fallback)."""
+        try:
+            from whitecell.config import get_groq_api_key
+            config_key = get_groq_api_key()
+            if config_key:
+                return config_key
+        except Exception as e:
+            logger.debug(f"Could not read API key from config: {e}")
+        return os.getenv("GROQ_API_KEY")
+
+    def _sync_api_key_from_sources(self) -> None:
+        """Refresh key from config/env if changed externally."""
+        candidate = self._resolve_preferred_api_key()
+        if candidate == self.api_key:
+            return
+        self.api_key = candidate
+        if self.api_key:
+            os.environ["GROQ_API_KEY"] = self.api_key
+        self._initialize_client()
+
     def _initialize_client(self):
         """Initialize the Groq client if API key is available."""
+        self.client = None
         if not GROQ_AVAILABLE:
             logger.debug("Groq library not installed. Install with: pip install groq")
             return
@@ -78,6 +91,7 @@ class GroqClient:
         Returns:
             True if API key is available and Groq library is installed, False otherwise
         """
+        self._sync_api_key_from_sources()
         return self.api_key is not None and GROQ_AVAILABLE and self.client is not None
 
     def reload_from_config(self) -> bool:
@@ -90,23 +104,34 @@ class GroqClient:
         try:
             from whitecell.config import get_groq_api_key
             self.api_key = get_groq_api_key()
+            if self.api_key:
+                os.environ["GROQ_API_KEY"] = self.api_key
             self._initialize_client()
             return self.is_configured()
         except Exception as e:
             logger.warning(f"Failed to reload Groq config: {e}")
             return False
 
-    def set_api_key(self, api_key: str) -> bool:
+    def set_api_key(self, api_key: str, persist: bool = True) -> bool:
         """
         Set a new API key and reinitialize the client.
 
         Args:
             api_key: The new API key
+            persist: Save key to persistent config for future sessions
 
         Returns:
             True if successful
         """
         self.api_key = api_key
+        if self.api_key:
+            os.environ["GROQ_API_KEY"] = self.api_key
+        if persist and self.api_key:
+            try:
+                from whitecell.config import set_groq_api_key
+                set_groq_api_key(self.api_key)
+            except Exception as e:
+                logger.warning(f"Failed to persist Groq API key: {e}")
         self._initialize_client()
         return self.is_configured()
 

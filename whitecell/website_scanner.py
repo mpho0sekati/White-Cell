@@ -2,19 +2,19 @@
 Website Security Scanner
 
 Analyze websites for security weaknesses including:
-- Domain/SSL analysis (passive)
-- Header analysis (active - requires permission)
+- Domain analysis (passive)
+- SSL/TLS and header checks (active - requires permission)
 - Known vulnerabilities (passive)
-- Security misconfigurations (active - requires permission)
+- Security misconfigurations based on real responses (active - requires permission)
 """
 
-import re
-import json
-from typing import Dict, Any, List, Optional
+import socket
+import ssl
+from typing import Dict, Any, List
 from urllib.parse import urlparse
+from urllib import request, error
 from datetime import datetime
 
-from whitecell.groq_client import groq_client
 from whitecell.detection import detect_threats
 
 
@@ -40,9 +40,21 @@ class WebsiteScanner:
         """Extract domain from URL."""
         try:
             parsed = urlparse(url if url.startswith(('http://', 'https://')) else f'https://{url}')
-            return parsed.netloc or url
+            return (parsed.netloc or url).split(":")[0]
         except Exception:
             return url
+
+    def _normalize_url(self, url: str) -> str:
+        """Ensure URL has scheme."""
+        if url.startswith(("http://", "https://")):
+            return url
+        return f"https://{url}"
+
+    def _request_url(self, url: str, timeout: int = 5) -> tuple[int, dict]:
+        """Request URL and return (status, headers)."""
+        req = request.Request(url, method="GET", headers={"User-Agent": "WhiteCellScanner/1.0"})
+        with request.urlopen(req, timeout=timeout) as resp:
+            return resp.getcode(), dict(resp.headers.items())
 
     def passive_scan(self, url: str) -> Dict[str, Any]:
         """Analyze URL for obvious weak points (no network access needed)."""
@@ -152,6 +164,7 @@ class WebsiteScanner:
         results["active_findings"] = []
 
         domain = self.extract_domain(url)
+        normalized_url = self._normalize_url(url)
 
         # Try to detect SSL/TLS issues
         ssl_info = self._check_ssl(domain)
@@ -159,14 +172,14 @@ class WebsiteScanner:
             results["active_findings"].extend(ssl_info)
             results["score"] -= 10 * len(ssl_info)
 
-        # Check for common headers via Groq if available
-        headers_analysis = self._analyze_headers_with_ai(domain)
+        # Check actual response headers
+        headers_analysis = self._analyze_security_headers(normalized_url)
         if headers_analysis:
             results["active_findings"].extend(headers_analysis)
             results["score"] -= 5 * len(headers_analysis)
 
-        # Simulate endpoint discovery
-        weak_endpoints = self._simulate_endpoint_discovery(domain)
+        # Probe weak endpoints and report only reachable ones
+        weak_endpoints = self._probe_common_endpoints(normalized_url)
         if weak_endpoints:
             results["active_findings"].extend(weak_endpoints)
             results["score"] -= 15
@@ -182,68 +195,122 @@ class WebsiteScanner:
         return results
 
     def _check_ssl(self, domain: str) -> List[Dict[str, Any]]:
-        """Check for SSL/TLS issues."""
-        findings = []
-        
-        # Simulate SSL check (in production, use ssl module or requests)
-        findings.append({
-            "type": "ssl_check_performed",
-            "severity": "info",
-            "description": f"SSL certificate analysis for {domain}",
-            "weakness": "Simulated SSL verification (requires real HTTPS library)",
-            "recommendation": "Use valid, current SSL certificate with proper chain"
-        })
-        
-        return findings
-
-    def _analyze_headers_with_ai(self, domain: str) -> List[Dict[str, Any]]:
-        """Use Groq to analyze security headers if available."""
+        """Check SSL/TLS connectivity and version."""
         findings = []
 
-        if not groq_client.is_configured():
-            return findings
-
+        context = ssl.create_default_context()
         try:
-            prompt = f"""Analyze security headers for {domain}. 
-            List common missing security headers that would make this domain vulnerable.
-            Format as JSON array of {{type, severity, description, recommendation}}.
-            Focus on: CSP, X-Frame-Options, X-Content-Type-Options, HSTS, X-XSS-Protection."""
+            with socket.create_connection((domain, 443), timeout=5) as sock:
+                with context.wrap_socket(sock, server_hostname=domain) as tls_sock:
+                    protocol = tls_sock.version() or "unknown"
+                    cert = tls_sock.getpeercert()
+                    not_after = cert.get("notAfter") if cert else None
 
-            # Try to parse response as JSON
-            content = groq_client.get_explanation(prompt)
-            if "[" in content:
-                json_str = content[content.index("["):content.rindex("]") + 1]
-                analysis = json.loads(json_str)
-                findings.extend(analysis)
-        except Exception:
-            pass
+            if protocol in {"TLSv1", "TLSv1.1"}:
+                findings.append({
+                    "type": "weak_tls_version",
+                    "severity": "high",
+                    "description": f"Server negotiated legacy TLS version: {protocol}",
+                    "weakness": "Outdated transport security protocol",
+                    "recommendation": "Disable TLS 1.0/1.1 and enforce TLS 1.2+"
+                })
+            else:
+                findings.append({
+                    "type": "ssl_tls_ok",
+                    "severity": "info",
+                    "description": f"TLS connectivity verified ({protocol})",
+                    "weakness": "None observed",
+                    "recommendation": "Continue certificate lifecycle monitoring"
+                })
 
-        return findings
-
-    def _simulate_endpoint_discovery(self, domain: str) -> List[Dict[str, Any]]:
-        """Identify potentially weak endpoints."""
-        findings = []
-        weak_found = []
-
-        for endpoint in self.common_weak_endpoints:
-            if endpoint in weak_found[:3]:  # Report top 3 only
-                continue
-            weak_found.append(endpoint)
+            if not not_after:
+                findings.append({
+                    "type": "cert_metadata_unavailable",
+                    "severity": "low",
+                    "description": "Certificate expiry metadata was not available",
+                    "weakness": "Unable to validate certificate expiry date",
+                    "recommendation": "Validate certificate details with your certificate authority"
+                })
+        except Exception as e:
             findings.append({
-                "type": "weak_endpoint",
-                "severity": "medium",
-                "description": f"Endpoint {endpoint} may be accessible",
-                "weakness": f"Potentially exposed: {endpoint}",
-                "recommendation": f"Disable or restrict access to {endpoint}"
+                "type": "ssl_connection_error",
+                "severity": "high",
+                "description": f"TLS check failed for {domain}: {e}",
+                "weakness": "TLS handshake/connectivity problem",
+                "recommendation": "Verify TLS certificate chain, host configuration, and network path"
             })
 
-        if weak_found:
+        return findings
+
+    def _analyze_security_headers(self, url: str) -> List[Dict[str, Any]]:
+        """Analyze actual HTTP response headers for security controls."""
+        findings = []
+
+        try:
+            _, headers = self._request_url(url, timeout=6)
+        except Exception as e:
+            return [{
+                "type": "http_request_failed",
+                "severity": "medium",
+                "description": f"Could not retrieve headers from {url}: {e}",
+                "weakness": "Unable to validate response headers",
+                "recommendation": "Verify host availability and retry scan"
+            }]
+
+        normalized = {k.lower(): v for k, v in headers.items()}
+        expected = {
+            "content-security-policy": "Add a restrictive Content-Security-Policy",
+            "x-frame-options": "Set X-Frame-Options to DENY or SAMEORIGIN",
+            "x-content-type-options": "Set X-Content-Type-Options to nosniff",
+            "strict-transport-security": "Enable HSTS with a suitable max-age",
+        }
+        for header, recommendation in expected.items():
+            if header not in normalized:
+                findings.append({
+                    "type": "missing_security_header",
+                    "severity": "medium",
+                    "description": f"Missing header: {header}",
+                    "weakness": "Browser-side protection is reduced",
+                    "recommendation": recommendation
+                })
+
+        return findings
+
+    def _probe_common_endpoints(self, base_url: str) -> List[Dict[str, Any]]:
+        """Probe common weak endpoints and report only reachable responses."""
+        findings = []
+        base = base_url.rstrip("/")
+        reachable = []
+
+        for endpoint in self.common_weak_endpoints[:10]:
+            target = f"{base}{endpoint}"
+            try:
+                status, _ = self._request_url(target, timeout=3)
+                # Consider 2xx/3xx/401/403 as endpoint exposure signals.
+                if status < 400 or status in {401, 403}:
+                    reachable.append((endpoint, status))
+            except error.HTTPError as e:
+                if e.code in {401, 403}:
+                    reachable.append((endpoint, e.code))
+            except Exception:
+                continue
+
+        for endpoint, status in reachable[:5]:
+            findings.append({
+                "type": "reachable_sensitive_endpoint",
+                "severity": "medium",
+                "description": f"Endpoint {endpoint} is reachable (HTTP {status})",
+                "weakness": f"Potentially exposed endpoint: {endpoint}",
+                "recommendation": f"Restrict or harden {endpoint}"
+            })
+
+        if reachable:
             findings.insert(0, {
                 "type": "endpoint_discovery",
                 "severity": "high",
-                "description": f"Found {len(weak_found)} potentially weak endpoints",
-                "weakness": "Common weak endpoints may be exploitable",
-                "recommendation": "Harden all endpoints, disable unused services"
+                "description": f"Found {len(reachable)} reachable sensitive endpoints",
+                "weakness": "Sensitive endpoints are externally reachable",
+                "recommendation": "Review exposure and enforce authentication/network restrictions"
             })
 
         return findings

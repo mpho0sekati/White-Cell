@@ -37,11 +37,33 @@ from whitecell.detection import get_all_threats, get_threat_description
 from whitecell.state import global_state
 from whitecell.command_mode import create_risk_table
 from whitecell.agent import agent_manager
-from whitecell.config import load_config, set_groq_api_key, get_groq_api_key, validate_groq_api_key
+from whitecell.crew import crew_manager
+from whitecell.config import (
+    load_config,
+    set_groq_api_key,
+    get_groq_api_key,
+    validate_groq_api_key,
+    get_scan_allowlist,
+    set_scan_allowlist,
+    get_governance_role,
+    set_governance_role,
+    get_approval_required_actions,
+    set_approval_required_actions,
+)
 from whitecell.groq_client import groq_client
 from whitecell.self_improve import self_improver
+from whitecell.website_scanner import website_scanner
+from whitecell import governance
 
 console = Console()
+
+WHITECELL_LOGO = r"""
+ __        ___     _ _         ____     _ _
+ \ \      / / |__ (_) |_ ___  / ___|___| | |
+  \ \ /\ / /| '_ \| | __/ _ \| |   / _ \ | |
+   \ V  V / | | | | | ||  __/| |__|  __/ | |
+    \_/\_/  |_| |_|_|\__\___| \____\___|_|_|
+"""
 
 # Command aliases for faster navigation
 COMMAND_ALIASES = {
@@ -58,6 +80,12 @@ COMMAND_ALIASES = {
     "ag": "agent",
     "d": "dashboard",
     "p": "peek",
+    "lg": "logo",
+    "tr": "triage",
+    "inv": "investigate",
+    "rsp": "respond",
+    "gov": "governance",
+    "sf": "soc",
 }
 
 # Quick command suggestions based on context
@@ -79,42 +107,67 @@ class EnhancedWhiteCellCLI:
         self.command_history = []
         initialize_logging()
         self.show_tips = True
+        self._menu_hint_shown = False
+        self.role = get_governance_role()
 
     def expand_alias(self, command: str) -> str:
         """Expand command aliases."""
         return COMMAND_ALIASES.get(command, command)
 
+    def _section_header(self, title: str, subtitle: Optional[str] = None) -> None:
+        """Render consistent section header style."""
+        body = f"[bold cyan]{title}[/bold cyan]"
+        if subtitle:
+            body += f"\n[dim]{subtitle}[/dim]"
+        console.print(Panel(body, border_style="cyan", expand=False))
+
+    def _check_permission(self, capability: str, action_name: str) -> bool:
+        """Enforce RBAC for command capabilities."""
+        self.role = get_governance_role()
+        if governance.has_permission(capability, self.role):
+            governance.audit_event("rbac", action_name, self.role, "allowed", {"capability": capability})
+            return True
+        governance.audit_event("rbac", action_name, self.role, "denied", {"capability": capability})
+        console.print(f"[red]Access denied for role '{self.role}' on '{action_name}'.[/red]")
+        return False
+
     def get_prompt(self) -> str:
         """Get dynamic prompt based on state."""
         if self.state.command_mode:
-            return "[bold red]⚠ [CRISIS MODE] WhiteCell >[/bold red] "
+            return "[bold red]WHITE CELL [CRISIS MODE] >[/bold red] "
         
         threat_count = len(self.session_threats)
         if threat_count > 5:
-            return f"[bold red]WhiteCell ({threat_count} critical) >[/bold red] "
+            return f"[bold red]WHITE CELL ({threat_count} critical) >[/bold red] "
         elif threat_count > 0:
-            return f"[bold yellow]WhiteCell ({threat_count} threats) >[/bold yellow] "
+            return f"[bold yellow]WHITE CELL ({threat_count} threats) >[/bold yellow] "
         
-        return "[bold cyan]WhiteCell >[/bold cyan] "
+        return "[bold cyan]WHITE CELL >[/bold cyan] "
+
+    def display_logo(self) -> None:
+        """Render the White Cell logo."""
+        console.print(Panel(
+            f"[bold cyan]{WHITECELL_LOGO}[/bold cyan]",
+            title="WHITE CELL",
+            border_style="blue",
+            expand=False,
+        ))
 
     def display_banner(self) -> None:
-        """Display an attractive banner on startup."""
-        banner = """
- ╔══════════════════════════════════════════════════════════════╗
- ║                                                              ║
- ║         [bold cyan]WHITE CELL[/bold cyan] - Cybersecurity Assistant            ║
- ║                                                              ║
- ║    Detection | Prevention | Intelligence | Protection       ║
- ║                                                              ║
- ║               Type [bold yellow]help[/bold yellow] for commands or [bold yellow]?[/bold yellow] for quick tips      ║
- ║              Type [bold yellow]dashboard[/bold yellow] for live threat view          ║
- ║                                                              ║
- ╚══════════════════════════════════════════════════════════════╝
-"""
-        console.print(banner)
+        """Display startup banner with logo and quick guidance."""
+        console.clear()
+        self.display_logo()
+        console.print(Panel(
+            "[bold cyan]Detection | Prevention | Intelligence | Protection[/bold cyan]\n"
+            "[dim]Type 'help' for command map, 'triage' to start SOC flow, 'peek' for live monitoring.[/dim]",
+            title="Cybersecurity Assistant",
+            border_style="cyan",
+            expand=False,
+        ))
 
     def display_dashboard(self) -> None:
         """Display a dashboard-style status view."""
+        console.clear()
         # Get statistics
         logs = get_session_logs()
         agent_stats = agent_manager.get_global_statistics()
@@ -161,7 +214,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         agent_text += "━━━━━━━━━━━━━━━━━━━━━━\n"
         
         for agent_id, status in agent_manager.get_all_status().items():
-            running = "🟢" if status['running'] else "🔴"
+            running = "UP" if status['running'] else "DOWN"
             agent_text += f"{running} {agent_id[:15]}\n"
             agent_text += f"   Checks: {status['checks_performed']}\n"
             agent_text += f"   Threats: {status['threats_detected']}\n"
@@ -220,11 +273,11 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             )
             layout["left"].update(Panel(summary, title="Live Status", border_style="green"))
 
-            logs_table = Table(title="Recent Threat Logs", show_header=True, header_style="bold magenta")
-            logs_table.add_column("Time", style="cyan", width=19)
-            logs_table.add_column("Type", style="yellow", width=18)
-            logs_table.add_column("Risk", style="red", width=8)
-            logs_table.add_column("Input", width=40)
+            logs_table = Table(title="Recent Threat Logs", show_header=True, header_style="bold magenta", expand=True)
+            logs_table.add_column("Time", style="cyan", width=19, no_wrap=True)
+            logs_table.add_column("Type", style="yellow", min_width=12, overflow="ellipsis")
+            logs_table.add_column("Risk", style="red", width=6, no_wrap=True)
+            logs_table.add_column("Input", overflow="ellipsis")
             if recent_logs:
                 for log in recent_logs:
                     logs_table.add_row(
@@ -237,11 +290,11 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
                 logs_table.add_row("-", "No threats logged yet", "-", "-")
             layout["right"]["logs"].update(logs_table)
 
-            events_table = Table(title="Recent Agent Events", show_header=True, header_style="bold magenta")
-            events_table.add_column("Time", style="cyan", width=19)
-            events_table.add_column("Event", style="yellow", width=18)
-            events_table.add_column("Agent", style="green", width=16)
-            events_table.add_column("Detail", width=36)
+            events_table = Table(title="Recent Agent Events", show_header=True, header_style="bold magenta", expand=True)
+            events_table.add_column("Time", style="cyan", width=19, no_wrap=True)
+            events_table.add_column("Event", style="yellow", min_width=12, overflow="ellipsis")
+            events_table.add_column("Agent", style="green", min_width=10, overflow="ellipsis")
+            events_table.add_column("Detail", overflow="ellipsis")
             if recent_events:
                 for ev in recent_events:
                     data = ev.get("data", {}) if isinstance(ev.get("data", {}), dict) else {}
@@ -262,7 +315,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             return layout
 
         try:
-            with Live(build_layout(), refresh_per_second=4, console=console, screen=False) as live:
+            with Live(build_layout(), refresh_per_second=4, console=console, screen=True) as live:
                 while True:
                     time.sleep(refresh_seconds)
                     live.update(build_layout())
@@ -272,60 +325,69 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
     def display_help(self) -> None:
         """Display comprehensive help with categories."""
         console.clear()
-        
-        # Header
-        console.print(Panel(
-            "[bold cyan]WHITE CELL - COMMAND REFERENCE[/bold cyan]",
-            style="cyan",
-            expand=False
-        ))
-        
-        # Core Commands
-        console.print("\n[bold green]═ CORE COMMANDS ═[/bold green]")
+
+        self._section_header("WHITE CELL COMMAND REFERENCE", "SOC-first workflow enabled")
+
+        console.print()
+        self._section_header("CORE COMMANDS")
         core_table = Table(show_header=True, header_style="bold magenta", show_lines=False)
         core_table.add_column("Command", style="cyan", width=15)
         core_table.add_column("Alias", style="yellow", width=8)
         core_table.add_column("Description", width=40)
-        
         core_commands = [
             ("help", "h, ?", "Show this help message"),
+            ("logo", "lg", "Show White Cell logo"),
             ("exit", "q", "Exit the application"),
             ("status", "st", "Display system status"),
             ("dashboard", "d", "Show live dashboard view"),
             ("peek", "p", "Open live peek monitoring window"),
             ("clear", "c", "Exit Command Mode"),
         ]
-        
         for cmd, alias, desc in core_commands:
             core_table.add_row(cmd, alias, desc)
-        
         console.print(core_table)
-        
-        # Threat Commands
-        console.print("\n[bold green]═ THREAT MANAGEMENT ═[/bold green]")
+
+        console.print()
+        self._section_header("SOC WORKFLOW")
+        soc_table = Table(show_header=True, header_style="bold magenta")
+        soc_table.add_column("Command", style="cyan", width=30)
+        soc_table.add_column("Description", width=40)
+        soc_commands = [
+            ("triage (tr) <alert_text>", "Classify alert and recommend next steps"),
+            ("investigate (inv) <threat|index>", "Build context from matching logs"),
+            ("respond (rsp) recommend <incident>", "Generate response plan"),
+            ("respond (rsp) execute <action> <target>", "Queue/execute governed response action"),
+            ("soc (sf) run <alert> [--execute a t]", "Run triage -> investigate -> respond"),
+        ]
+        for cmd, desc in soc_commands:
+            soc_table.add_row(cmd, desc)
+        console.print(soc_table)
+
+        console.print()
+        self._section_header("THREAT MANAGEMENT")
         threat_table = Table(show_header=True, header_style="bold magenta")
         threat_table.add_column("Command", style="cyan", width=25)
         threat_table.add_column("Description", width=45)
-        
         threat_commands = [
             ("threats (t)", "View all 9 threat types"),
             ("logs (l) [limit]", "Show latest threat logs"),
             ("search (s) <term>", "Search logs by threat type"),
             ("analyze (a) <type>", "Analyze specific threat"),
             ("export (e) [csv|json]", "Export logs to file"),
+            ("scan website <url> [--active]", "Authorized website security analysis"),
+            ("scan allowlist show", "List domains approved for active probing"),
+            ("scan allowlist add <domain>", "Approve a domain for active probing"),
+            ("scan allowlist remove <domain>", "Remove a domain from active probing allowlist"),
         ]
-        
         for cmd, desc in threat_commands:
             threat_table.add_row(cmd, desc)
-        
         console.print(threat_table)
-        
-        # Agent Commands
-        console.print("\n[bold green]═ AGENT MANAGEMENT ═[/bold green]")
+
+        console.print()
+        self._section_header("AGENT MANAGEMENT")
         agent_table = Table(show_header=True, header_style="bold magenta")
         agent_table.add_column("Command", style="cyan", width=35)
         agent_table.add_column("Description", width=35)
-        
         agent_commands = [
             ("agent deploy <name> [interval]", "Deploy a new agent"),
             ("agent (ag) stop <name>", "Stop a running agent"),
@@ -336,32 +398,46 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             ("agent red <scenario>", "Run Red Team authorized simulation"),
             ("agent battle <scenario>", "Run Blue vs Red scenario"),
             ("agent ask <prompt>", "General AI cybersecurity prompt"),
+            ("agent crewai <objective>", "Run CrewAI mission with current API key"),
             ("agent evolve <cmd>", "Autonomous self-improvement controls"),
         ]
-        
         for cmd, desc in agent_commands:
             agent_table.add_row(cmd, desc)
-        
         console.print(agent_table)
-        
-        # Tips
-        console.print("\n[bold green]═ QUICK TIPS ═[/bold green]")
-        tips = [
-            "[cyan]•[/cyan] Type partial commands - they auto-complete",
-            "[cyan]•[/cyan] Use aliases for faster typing: 't' for 'threats', 's' for 'search'",
-            "[cyan]•[/cyan] Try 'dashboard' for a live threat view",
-            "[cyan]•[/cyan] Commands are case-insensitive",
-            "[cyan]•[/cyan] 'agent configure' is optional - system works without GROQ",
+
+        console.print()
+        self._section_header("GOVERNANCE")
+        gov_table = Table(show_header=True, header_style="bold magenta")
+        gov_table.add_column("Command", style="cyan", width=40)
+        gov_table.add_column("Description", width=30)
+        gov_commands = [
+            ("governance (gov) status", "Show role, policy, and pending approvals"),
+            ("governance role <admin|analyst|viewer>", "Set active operator role"),
+            ("governance approvals list", "List approval requests"),
+            ("governance approvals approve <id>", "Approve pending request"),
+            ("governance approvals reject <id>", "Reject pending request"),
         ]
-        
+        for cmd, desc in gov_commands:
+            gov_table.add_row(cmd, desc)
+        console.print(gov_table)
+
+        console.print()
+        self._section_header("QUICK TIPS")
+        tips = [
+            "[cyan]-[/cyan] Type partial commands - they auto-complete",
+            "[cyan]-[/cyan] Use aliases for faster typing: 't' for 'threats', 's' for 'search'",
+            "[cyan]-[/cyan] SOC default flow: triage -> investigate -> respond",
+            "[cyan]-[/cyan] Try 'dashboard' or 'peek' for live visibility",
+            "[cyan]-[/cyan] Commands are case-insensitive",
+            "[cyan]-[/cyan] 'agent configure' is optional - system works without GROQ",
+        ]
         for tip in tips:
             console.print(f"  {tip}")
-        
         console.print()
-
     def display_quick_menu(self) -> Optional[str]:
         """Display a quick interactive menu."""
-        console.print("\n[bold cyan]═ QUICK MENU ═[/bold cyan]")
+        console.print()
+        self._section_header("QUICK MENU")
         menu_options = [
             ("1", "View Threats", "See all threat types"),
             ("2", "Check Status", "System status report"),
@@ -371,6 +447,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             ("6", "View Logs", "Recent threat logs"),
             ("7", "Export Data", "Save logs to file"),
             ("8", "Peek Window", "Continuous live monitoring"),
+            ("9", "Show Logo", "Display White Cell logo"),
             ("0", "Back to CLI", "Return to command line"),
         ]
         
@@ -380,7 +457,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         
         console.print(menu_table)
         
-        choice = Prompt.ask("\n[cyan]Select option[/cyan]", choices=["0", "1", "2", "3", "4", "5", "6", "7", "8"])
+        choice = Prompt.ask("\n[cyan]Select option[/cyan]", choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"])
         return choice
 
     def handle_menu_selection(self, choice: str) -> bool:
@@ -404,6 +481,8 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             self.export_logs_interactive()
         elif choice == "8":
             self.display_peek_window()
+        elif choice == "9":
+            self.display_logo()
         elif choice == "0":
             return True
         
@@ -413,7 +492,8 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         """Display all threat types with enhanced formatting."""
         threats = get_all_threats()
         
-        console.print("\n[bold cyan]═ THREAT TYPES (9 Total) ═[/bold cyan]\n")
+        console.print()
+        self._section_header("THREAT TYPES", "9 total known classes")
         
         table = Table(show_header=True, header_style="bold white on red", padding=(0, 1))
         table.add_column("Type", style="red", width=18)
@@ -425,7 +505,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         for threat in threats:
             severity = threat['severity']
             severity_color = "red" if severity >= 8 else "yellow" if severity >= 6 else "green"
-            severity_bar = "█" * severity + "░" * (10 - severity)
+            severity_bar = "#" * severity + "-" * (10 - severity)
             
             popia = "[red]YES[/red]" if threat['popia_exposure'] else "[green]NO[/green]"
             
@@ -446,10 +526,10 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         threat_counts = Counter(threat_types)
         agent_stats = agent_manager.get_global_statistics()
         
-        console.print("\n[bold cyan]═ SYSTEM STATUS ═[/bold cyan]\n")
+        console.print("\n[bold cyan]SYSTEM STATUS[/bold cyan]\n")
         
         # System Health Panel
-        health_level = "🟢 HEALTHY" if len(logs) == 0 else "🟡 MONITORING" if len(logs) < 5 else "🔴 CRITICAL"
+        health_level = "HEALTHY" if len(logs) == 0 else "MONITORING" if len(logs) < 5 else "CRITICAL"
         health_color = "green" if len(logs) == 0 else "yellow" if len(logs) < 5 else "red"
         
         console.print(Panel(
@@ -471,7 +551,9 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             ("Running Agents", f"{agent_stats['running_agents']}/{agent_stats['total_agents']}"),
             ("Total Checks", str(agent_stats['total_checks_performed'])),
             ("Threats Prevented", str(agent_stats['total_prevented'])),
-            ("Command Mode", "🔴 ACTIVE" if self.state.command_mode else "🟢 INACTIVE"),
+            ("Role", get_governance_role()),
+            ("Pending Approvals", str(len(governance.list_approvals(status="pending")))),
+            ("Command Mode", "ACTIVE" if self.state.command_mode else "INACTIVE"),
         ]
         
         for metric, value in stats_data:
@@ -483,7 +565,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         if threat_counts:
             console.print("\n[bold]Top Detected Threats:[/bold]")
             for threat_type, count in threat_counts.most_common(3):
-                bar = "▰" * count + "▱" * (5 - min(count, 5))
+                bar = "#" * min(count, 5) + "-" * (5 - min(count, 5))
                 console.print(f"  {threat_type:20} {bar} {count}")
 
     def display_logs(self, limit: int = 10) -> None:
@@ -496,14 +578,14 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         
         logs_to_show = logs[-limit:]
         
-        console.print(f"\n[bold cyan]═ RECENT LOGS (Latest {len(logs_to_show)}) ═[/bold cyan]\n")
-        
-        table = Table(show_header=True, header_style="bold magenta", padding=(0, 1))
-        table.add_column("Time", style="cyan", width=19)
-        table.add_column("Type", style="yellow", width=16)
-        table.add_column("Risk", width=8)
-        table.add_column("Status", width=12)
-        table.add_column("Details", width=35)
+        console.print(f"\n[bold cyan]RECENT LOGS (Latest {len(logs_to_show)})[/bold cyan]\n")
+
+        table = Table(show_header=True, header_style="bold magenta", padding=(0, 1), expand=True)
+        table.add_column("Time", style="cyan", width=19, no_wrap=True)
+        table.add_column("Type", style="yellow", min_width=12, overflow="ellipsis")
+        table.add_column("Risk", width=6, no_wrap=True)
+        table.add_column("Status", width=8, no_wrap=True)
+        table.add_column("Details", overflow="ellipsis")
         
         for log in logs_to_show:
             timestamp = log.get('timestamp', 'N/A')[:19]
@@ -521,7 +603,8 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
 
     def deploy_agent_interactive(self) -> None:
         """Interactive agent deployment."""
-        console.print("\n[bold cyan]═ DEPLOY NEW AGENT ═[/bold cyan]")
+        console.print()
+        self._section_header("DEPLOY NEW AGENT")
         console.print("[dim](Type 'cancel' to go back)[/dim]\n")
         
         agent_id = Prompt.ask("[cyan]Agent name[/cyan]", default="monitor-1")
@@ -556,7 +639,8 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
 
     def export_logs_interactive(self) -> None:
         """Interactive log export."""
-        console.print("\n[bold cyan]═ EXPORT LOGS ═[/bold cyan]")
+        console.print()
+        self._section_header("EXPORT LOGS")
         console.print("[dim](Type 'cancel' to go back)[/dim]\n")
         
         format_choice = Prompt.ask("[cyan]Export format[/cyan]", choices=["csv", "json"], default="csv")
@@ -595,7 +679,8 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
 
     def configure_groq_api(self) -> None:
         """Interactive GROQ configuration."""
-        console.print("\n[bold cyan]═ GROQ API CONFIGURATION ═[/bold cyan]")
+        console.print()
+        self._section_header("GROQ API CONFIGURATION")
         console.print("[dim]Get your free API key: https://console.groq.com/keys[/dim]")
         console.print("[dim](Type 'cancel' to go back)[/dim]\n")
         
@@ -658,11 +743,12 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         
         try:
             while self.state.session_active:
-                # Show menu option hint
-                menu_hint = "[dim]Type [cyan]?[/cyan] for menu or [cyan]help[/cyan] for commands[/dim]"
-                console.print(menu_hint)
+                # Show menu hint once to keep the view clean
+                if not self._menu_hint_shown:
+                    console.print("[dim]Type [cyan]?[/cyan] for menu or [cyan]help[/cyan] for commands[/dim]")
+                    self._menu_hint_shown = True
                 
-                user_input = input(self.get_prompt())
+                user_input = console.input(self.get_prompt())
                 
                 if not user_input.strip():
                     continue
@@ -682,7 +768,11 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
                 command = self.expand_alias(command)
                 
                 # Handle built-in commands
-                if command in ["exit", "help", "threats", "status", "logs", "search", "analyze", "export", "clear", "agent", "dashboard", "peek"]:
+                if command in [
+                    "exit", "help", "logo", "threats", "status", "logs", "search", "analyze",
+                    "export", "clear", "agent", "dashboard", "peek", "scan",
+                    "triage", "investigate", "respond", "governance", "soc",
+                ]:
                     result = self.handle_command(command, args)
                     if result is False:
                         break
@@ -703,17 +793,29 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             console.print("[bold green]✓ Goodbye![/bold green]")
             return False
         elif command == "help":
+            if not self._check_permission("view.help", "help"):
+                return True
             self.display_help()
+        elif command == "logo":
+            self.display_logo()
         elif command == "threats":
+            if not self._check_permission("view.status", "threats"):
+                return True
             self.display_threat_types()
         elif command == "status":
+            if not self._check_permission("view.status", "status"):
+                return True
             self.display_status()
         elif command == "dashboard":
+            if not self._check_permission("view.dashboard", "dashboard"):
+                return True
             try:
                 self.display_dashboard()
             except KeyboardInterrupt:
                 console.print("\n[yellow]Dashboard closed[/yellow]")
         elif command == "peek":
+            if not self._check_permission("view.dashboard", "peek"):
+                return True
             try:
                 refresh_seconds = float(args[0]) if args else 1.0
             except ValueError:
@@ -721,20 +823,52 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
                 return True
             self.display_peek_window(refresh_seconds)
         elif command == "logs":
+            if not self._check_permission("view.logs", "logs"):
+                return True
             limit = int(args[0]) if args and args[0].isdigit() else 10
             self.display_logs(limit)
         elif command == "search":
+            if not self._check_permission("view.logs", "search"):
+                return True
             if not args:
                 console.print("[yellow]Usage: search <threat_type>[/yellow]")
             # Search logic here (simplified)
         elif command == "analyze":
+            if not self._check_permission("view.logs", "analyze"):
+                return True
             if not args:
                 console.print("[yellow]Usage: analyze <threat_type>[/yellow]")
             # Analysis logic here
         elif command == "export":
+            if not self._check_permission("view.logs", "export"):
+                return True
             self.export_logs_interactive()
+        elif command == "scan":
+            if not self._check_permission("scan.website.passive", "scan"):
+                return True
+            self.handle_scan_command(args)
         elif command == "agent":
+            if not self._check_permission("agent.use", "agent"):
+                return True
             self.handle_agent_command(args)
+        elif command == "triage":
+            if not self._check_permission("soc.triage", "triage"):
+                return True
+            self.handle_triage_command(args)
+        elif command == "investigate":
+            if not self._check_permission("soc.investigate", "investigate"):
+                return True
+            self.handle_investigate_command(args)
+        elif command == "respond":
+            if not self._check_permission("soc.respond", "respond"):
+                return True
+            self.handle_respond_command(args)
+        elif command == "governance":
+            self.handle_governance_command(args)
+        elif command == "soc":
+            if not self._check_permission("soc.triage", "soc"):
+                return True
+            self.handle_soc_command(args)
         elif command == "task":
             self.handle_task_command(args)
         elif command == "clear":
@@ -746,10 +880,296 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         
         return True
 
+    def handle_triage_command(self, args: list) -> None:
+        """SOC triage: classify incoming alert and provide next steps."""
+        alert_text = " ".join(args).strip()
+        if not alert_text:
+            alert_text = Prompt.ask("[cyan]Enter alert text to triage[/cyan]").strip()
+            if not alert_text:
+                console.print("[yellow]No alert text provided.[/yellow]")
+                return
+
+        from whitecell.detection import detect_threat, get_threat_context
+        from whitecell.risk import calculate_risk, get_threat_mitigations
+
+        threat_info = detect_threat(alert_text)
+        if not threat_info:
+            governance.audit_event("soc", "triage", self.role, "no-threat", {"input": alert_text[:80]})
+            console.print(Panel("No known threat signature detected.\nRecommendation: monitor and collect more telemetry.", title="Triage Result", border_style="green"))
+            return
+
+        threat_info.update(get_threat_context(threat_info["threat_type"]))
+        risk_info = calculate_risk(threat_info)
+        mitigations = get_threat_mitigations(threat_info["threat_type"])[:4]
+        mitigation_text = "\n".join(f"- {m}" for m in mitigations) if mitigations else "- No predefined mitigations."
+
+        body = (
+            f"[bold]Threat Type:[/bold] {threat_info.get('threat_type')}\n"
+            f"[bold]Risk Score:[/bold] {risk_info.get('risk_score')}\n"
+            f"[bold]Risk Level:[/bold] {risk_info.get('risk_level')}\n"
+            f"[bold]Severity:[/bold] {threat_info.get('severity')}\n\n"
+            f"[bold]Recommended Immediate Actions[/bold]\n{mitigation_text}"
+        )
+        governance.audit_event(
+            "soc",
+            "triage",
+            self.role,
+            "completed",
+            {"threat_type": threat_info.get("threat_type"), "risk_score": risk_info.get("risk_score")},
+        )
+        console.print(Panel(body, title="Triage Result", border_style="cyan"))
+
+    def handle_investigate_command(self, args: list) -> None:
+        """SOC investigate: pivot on threat type or log index."""
+        selector = " ".join(args).strip()
+        if not selector:
+            selector = Prompt.ask("[cyan]Threat type or log index[/cyan]").strip()
+            if not selector:
+                console.print("[yellow]No investigation selector provided.[/yellow]")
+                return
+
+        logs = get_session_logs()
+        if not logs:
+            console.print("[yellow]No logs available for investigation.[/yellow]")
+            return
+
+        matches = []
+        if selector.isdigit():
+            idx = int(selector)
+            if 0 <= idx < len(logs):
+                matches = [logs[idx]]
+        else:
+            query = selector.lower()
+            matches = [l for l in logs if query in str(l.get("threat_type", "")).lower()]
+
+        if not matches:
+            console.print(f"[yellow]No logs matched '{selector}'.[/yellow]")
+            return
+
+        table = Table(title=f"Investigation Matches ({len(matches)})", show_header=True, header_style="bold magenta", expand=True)
+        table.add_column("Time", style="cyan", width=19, no_wrap=True)
+        table.add_column("Threat", style="yellow", min_width=12)
+        table.add_column("Risk", style="red", width=6, no_wrap=True)
+        table.add_column("Input", overflow="ellipsis")
+        for row in matches[-10:]:
+            table.add_row(
+                str(row.get("timestamp", ""))[:19],
+                str(row.get("threat_type", "unknown")),
+                str(row.get("risk_score", "-")),
+                str(row.get("user_input", ""))[:60],
+            )
+        governance.audit_event("soc", "investigate", self.role, "completed", {"selector": selector, "matches": len(matches)})
+        console.print(table)
+
+    def handle_respond_command(self, args: list) -> None:
+        """SOC respond: recommend or execute actions with governance controls."""
+        if not args:
+            console.print("[yellow]Usage: respond <recommend|execute> ...[/yellow]")
+            return
+
+        mode = args[0].lower()
+        if mode == "recommend":
+            incident = " ".join(args[1:]).strip() or Prompt.ask("[cyan]Incident summary[/cyan]").strip()
+            if not incident:
+                console.print("[yellow]Incident summary is required.[/yellow]")
+                return
+            recommendations = [
+                "Contain impacted assets and isolate affected hosts.",
+                "Collect volatile evidence and preserve logs.",
+                "Rotate exposed credentials and tokens.",
+                "Apply IOCs to detection and blocklists.",
+            ]
+            body = "\n".join(f"- {item}" for item in recommendations)
+            governance.audit_event("soc", "respond.recommend", self.role, "completed", {"incident": incident[:80]})
+            console.print(Panel(body, title="Response Recommendations", border_style="green"))
+            return
+
+        if mode != "execute":
+            console.print("[yellow]Usage: respond <recommend|execute> ...[/yellow]")
+            return
+
+        if len(args) < 3:
+            console.print("[yellow]Usage: respond execute <action> <target>[/yellow]")
+            console.print("[dim]Actions: isolate_host, block_ip, disable_user, collect_forensics[/dim]")
+            return
+
+        action = args[1].strip().lower()
+        target = " ".join(args[2:]).strip()
+        action_key = f"respond.{action}"
+        reason = f"CLI response action on target '{target}'"
+
+        if governance.is_approval_required(action_key):
+            approved = [
+                req for req in governance.list_approvals(status="approved")
+                if req.get("action") == action_key and req.get("target") == target
+            ]
+            if approved:
+                governance.audit_event(
+                    "soc",
+                    action_key,
+                    self.role,
+                    "executed",
+                    {"target": target, "approval_id": approved[-1].get("id")},
+                )
+                console.print(
+                    Panel(
+                        f"Executed action '{action}' for target '{target}' using approval {approved[-1].get('id')}.",
+                        title="Response Execution",
+                        border_style="green",
+                    )
+                )
+                return
+            req = governance.request_approval(action_key, target, reason, self.role)
+            console.print(f"[yellow]Approval required before execution.[/yellow] Request ID: [cyan]{req['id']}[/cyan]")
+            console.print("[dim]Approve with: governance approvals approve <id>[/dim]")
+            return
+
+        governance.audit_event("soc", action_key, self.role, "executed", {"target": target})
+        console.print(Panel(f"Executed action '{action}' for target '{target}'.", title="Response Execution", border_style="green"))
+
+    def handle_governance_command(self, args: list) -> None:
+        """Governance controls for role, policy, approvals, and status."""
+        if not args:
+            args = ["status"]
+
+        sub = args[0].lower()
+
+        if sub == "status":
+            pending = governance.list_approvals(status="pending")
+            table = Table(title="Governance Status", show_header=True, header_style="bold magenta")
+            table.add_column("Field", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_row("Role", get_governance_role())
+            table.add_row("Pending Approvals", str(len(pending)))
+            table.add_row("Approval Rules", ", ".join(get_approval_required_actions()) or "-")
+            console.print(table)
+            return
+
+        if sub == "role":
+            if not self._check_permission("governance.manage", "governance role"):
+                return
+            if len(args) < 2:
+                console.print("[yellow]Usage: governance role <admin|analyst|viewer>[/yellow]")
+                return
+            role = args[1].lower()
+            if set_governance_role(role):
+                self.role = role
+                governance.audit_event("governance", "role.set", self.role, "completed", {"role": role})
+                console.print(f"[green]Role updated to {role}.[/green]")
+            else:
+                console.print("[red]Invalid role. Choose admin, analyst, or viewer.[/red]")
+            return
+
+        if sub == "policy":
+            if not self._check_permission("governance.manage", "governance policy"):
+                return
+            if len(args) < 3:
+                console.print("[yellow]Usage: governance policy <add|remove> <action>[/yellow]")
+                return
+            action = args[1].lower()
+            action_name = args[2].strip().lower()
+            rules = get_approval_required_actions()
+            if action == "add":
+                if action_name not in rules:
+                    rules.append(action_name)
+                set_approval_required_actions(rules)
+                console.print(f"[green]Approval rule added: {action_name}[/green]")
+                return
+            if action == "remove":
+                rules = [r for r in rules if r != action_name]
+                set_approval_required_actions(rules)
+                console.print(f"[green]Approval rule removed: {action_name}[/green]")
+                return
+            console.print("[yellow]Usage: governance policy <add|remove> <action>[/yellow]")
+            return
+
+        if sub == "approvals":
+            if len(args) < 2:
+                console.print("[yellow]Usage: governance approvals <list|approve|reject> [id][/yellow]")
+                return
+            action = args[1].lower()
+            if action == "list":
+                rows = governance.list_approvals()
+                if not rows:
+                    console.print("[yellow]No approval requests found.[/yellow]")
+                    return
+                table = Table(title="Approval Requests", show_header=True, header_style="bold magenta")
+                table.add_column("ID", style="cyan")
+                table.add_column("Status", style="yellow")
+                table.add_column("Action", style="red")
+                table.add_column("Target", style="green")
+                table.add_column("Requested By", style="white")
+                for req in rows[-15:]:
+                    table.add_row(req.get("id", "-"), req.get("status", "-"), req.get("action", "-"), req.get("target", "-"), req.get("requested_by", "-"))
+                console.print(table)
+                return
+
+            if action in {"approve", "reject"}:
+                if not self._check_permission("governance.manage", f"governance approvals {action}"):
+                    return
+                if len(args) < 3:
+                    console.print(f"[yellow]Usage: governance approvals {action} <id>[/yellow]")
+                    return
+                ok = governance.review_approval(args[2], action, self.role)
+                if ok:
+                    console.print(f"[green]Request {args[2]} {action}d.[/green]")
+                else:
+                    console.print("[red]Unable to update request. Check ID and current status.[/red]")
+                return
+
+            console.print("[yellow]Usage: governance approvals <list|approve|reject> [id][/yellow]")
+            return
+
+        console.print("[yellow]Usage: governance <status|role|policy|approvals> ...[/yellow]")
+
+    def _parse_soc_run(self, args: list[str]) -> tuple[str, Optional[str], Optional[str]]:
+        """Parse `soc run` args into alert text and optional execute action/target."""
+        if not args:
+            return "", None, None
+        if "--execute" not in args:
+            return " ".join(args).strip(), None, None
+
+        idx = args.index("--execute")
+        alert_text = " ".join(args[:idx]).strip()
+        remaining = args[idx + 1:]
+        if len(remaining) < 2:
+            return alert_text, None, None
+        action = remaining[0].strip().lower()
+        target = " ".join(remaining[1:]).strip()
+        return alert_text, action, target
+
+    def handle_soc_command(self, args: list) -> None:
+        """Run SOC-first chained workflows."""
+        if not args or args[0].lower() != "run":
+            console.print("[yellow]Usage: soc run <alert_text> [--execute <action> <target>][/yellow]")
+            return
+
+        alert_text, action, target = self._parse_soc_run(args[1:])
+        if not alert_text:
+            alert_text = Prompt.ask("[cyan]Enter alert text[/cyan]").strip()
+            if not alert_text:
+                console.print("[yellow]Alert text is required.[/yellow]")
+                return
+
+        self._section_header("SOC RUN", "triage -> investigate -> respond")
+        self.handle_triage_command([alert_text])
+
+        from whitecell.detection import detect_threat
+        threat_info = detect_threat(alert_text)
+        if threat_info and threat_info.get("threat_type"):
+            self.handle_investigate_command([str(threat_info["threat_type"])])
+        else:
+            self.handle_investigate_command([alert_text])
+
+        self.handle_respond_command(["recommend", alert_text])
+
+        if action and target:
+            self.handle_respond_command(["execute", action, target])
+
     def handle_agent_command(self, args: list) -> None:
         """Handle agent commands."""
         if not args:
-            console.print("[cyan]Agent commands: deploy, stop, status, threats, configure, blue, red, battle, ask, evolve[/cyan]")
+            console.print("[cyan]Agent commands: deploy, stop, status, threats, configure, blue, red, battle, ask, crewai, evolve[/cyan]")
             console.print("[dim]Evolve cmds: start [sec], stop, status, generate, review [id], approve <id>, apply <id> <token>, reject <id>[/dim]")
             return
         
@@ -770,10 +1190,35 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             self.run_agent_ai_prompt("battle", prompt_text)
         elif subcommand == "ask":
             self.run_agent_ai_prompt("ask", prompt_text)
+        elif subcommand == "crewai":
+            self.run_crewai_objective(prompt_text)
         elif subcommand == "evolve":
             self.handle_self_improve_command(args[1:])
         else:
             console.print(f"[yellow]Unknown agent subcommand: {subcommand}[/yellow]")
+
+    def run_crewai_objective(self, objective: str) -> None:
+        """Execute objective using CrewAI framework with active API key."""
+        if not objective:
+            objective = Prompt.ask("[cyan]Enter CrewAI objective[/cyan]").strip()
+            if not objective:
+                console.print("[yellow]Objective cannot be empty.[/yellow]")
+                return
+
+        with console.status("[cyan]Running CrewAI mission...[/cyan]", spinner="dots"):
+            result = crew_manager.run_crewai_mission(objective)
+
+        status = result.get("status")
+        if status == "success":
+            console.print(Panel(result.get("result", ""), title="CrewAI Result", border_style="green"))
+            return
+
+        if status == "unavailable":
+            console.print("[yellow]CrewAI framework not installed.[/yellow]")
+            console.print("[dim]Install with: pip install crewai[/dim]")
+            return
+
+        console.print(Panel(result.get("message", "CrewAI mission failed."), title="CrewAI", border_style="red"))
 
     def handle_self_improve_command(self, args: list) -> None:
         """Handle guarded autonomous self-improvement commands."""
@@ -916,6 +1361,163 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             result = groq_client.get_explanation(prompt_text)
         console.print(Panel(result, title="Agent Response", border_style="green"))
 
+    def handle_scan_command(self, args: list) -> None:
+        """Handle security scan commands.
+
+        Usage:
+          scan website <url> [--active]
+          scan allowlist <show|add|remove> [domain]
+        """
+        if not args:
+            console.print("[yellow]Usage: scan website <url> [--active][/yellow]")
+            console.print("[yellow]       scan allowlist <show|add|remove> [domain][/yellow]")
+            return
+
+        sub = args[0].lower()
+        remaining = args[1:]
+
+        if sub == "website":
+            self.scan_website(remaining)
+            return
+
+        if sub == "allowlist":
+            self.handle_scan_allowlist_command(remaining)
+            return
+
+        console.print("[yellow]Usage: scan website <url> [--active][/yellow]")
+        console.print("[yellow]       scan allowlist <show|add|remove> [domain][/yellow]")
+
+    def _normalize_domain(self, domain_or_url: str) -> str:
+        """Normalize URL/domain into lowercase hostname for allowlist matching."""
+        raw = (domain_or_url or "").strip().lower()
+        if not raw:
+            return ""
+
+        host = website_scanner.extract_domain(raw)
+        host = host.split(":")[0]
+        if host.startswith("www."):
+            host = host[4:]
+        return host
+
+    def _is_domain_allowlisted(self, domain: str) -> bool:
+        """Return True if domain is explicitly allowlisted or subdomain of an allowlisted root."""
+        normalized = self._normalize_domain(domain)
+        if not normalized:
+            return False
+
+        for item in get_scan_allowlist():
+            allowed = self._normalize_domain(str(item))
+            if not allowed:
+                continue
+            if normalized == allowed or normalized.endswith(f".{allowed}"):
+                return True
+        return False
+
+    def handle_scan_allowlist_command(self, args: list) -> None:
+        """Manage domain allowlist for active website probing."""
+        if not args:
+            console.print("[yellow]Usage: scan allowlist <show|add|remove> [domain][/yellow]")
+            return
+
+        action = args[0].lower()
+        current = list(get_scan_allowlist())
+
+        if action == "show":
+            if not current:
+                console.print("[yellow]Scan allowlist is empty. Active probing will be blocked.[/yellow]")
+                return
+            table = Table(title="Scan Allowlist", show_header=True, header_style="bold magenta")
+            table.add_column("Approved Domain", style="cyan")
+            for domain in sorted(current):
+                table.add_row(domain)
+            console.print(table)
+            return
+
+        if action not in {"add", "remove"}:
+            console.print("[yellow]Usage: scan allowlist <show|add|remove> [domain][/yellow]")
+            return
+
+        if len(args) < 2:
+            console.print(f"[yellow]Usage: scan allowlist {action} <domain>[/yellow]")
+            return
+
+        domain = self._normalize_domain(args[1])
+        if not domain:
+            console.print("[red]Invalid domain.[/red]")
+            return
+
+        if action == "add":
+            if domain in current:
+                console.print(f"[yellow]{domain} is already allowlisted.[/yellow]")
+                return
+            current.append(domain)
+            if set_scan_allowlist(sorted(set(current))):
+                console.print(f"[green]Added {domain} to scan allowlist.[/green]")
+            else:
+                console.print("[red]Failed to update scan allowlist.[/red]")
+            return
+
+        # remove
+        if domain not in current:
+            console.print(f"[yellow]{domain} is not in scan allowlist.[/yellow]")
+            return
+        current = [d for d in current if d != domain]
+        if set_scan_allowlist(current):
+            console.print(f"[green]Removed {domain} from scan allowlist.[/green]")
+        else:
+            console.print("[red]Failed to update scan allowlist.[/red]")
+
+    def scan_website(self, args: list) -> None:
+        """Run passive scan and optional active probing on authorized targets only."""
+        if not args:
+            console.print("[yellow]Usage: scan website <url> [--active][/yellow]")
+            return
+
+        url = args[0]
+        active_requested = "--active" in args[1:]
+        domain = self._normalize_domain(url)
+
+        console.print("[bold yellow]Authorized testing only.[/bold yellow] You must own the target or have explicit permission.")
+        if not Confirm.ask("Do you confirm you are authorized to test this website?", default=False):
+            console.print("[yellow]Scan cancelled.[/yellow]")
+            return
+
+        with console.status(f"[cyan]Running passive analysis for {url}...[/cyan]", spinner="dots"):
+            passive_result = website_scanner.passive_scan(url)
+        console.print(website_scanner.format_report(passive_result))
+        governance.audit_event("scan", "scan.website.passive", self.role, "completed", {"url": url, "domain": domain})
+
+        if not active_requested and passive_result.get("risk_level") not in {"high", "critical"}:
+            return
+
+        if not self._is_domain_allowlisted(domain):
+            console.print(f"[red]Active probing blocked for {domain}.[/red]")
+            console.print("[yellow]Pre-approve target with:[/yellow] [cyan]scan allowlist add <domain>[/cyan]")
+            governance.audit_event("scan", "scan.website.active", self.role, "blocked", {"url": url, "reason": "domain_not_allowlisted"})
+            return
+
+        if governance.is_approval_required("scan.website.active"):
+            req = governance.request_approval(
+                "scan.website.active",
+                domain,
+                "Active website probing request",
+                self.role,
+                {"url": url},
+            )
+            console.print(f"[yellow]Active probing requires approval.[/yellow] Request ID: [cyan]{req['id']}[/cyan]")
+            console.print("[dim]Approve with: governance approvals approve <id>[/dim]")
+            return
+
+        console.print("\n[bold yellow]Active probing can trigger alerts on target infrastructure.[/bold yellow]")
+        if not Confirm.ask("Proceed with active probing?", default=False):
+            console.print("[yellow]Active probing skipped.[/yellow]")
+            return
+
+        with console.status(f"[cyan]Running active probing for {url}...[/cyan]", spinner="dots"):
+            active_result = website_scanner.active_scan(url)
+        governance.audit_event("scan", "scan.website.active", self.role, "completed", {"url": url, "domain": domain})
+        console.print(website_scanner.format_report(active_result))
+
     def handle_task_command(self, args: list) -> None:
         """Handle task commands."""
         if not args:
@@ -936,7 +1538,9 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
 
     def assign_task_interactive(self) -> None:
         """Interactively assign a task to an agent."""
-        console.print("\n[bold cyan]═ TASK ASSIGNMENT ═[/bold cyan]\n")
+        console.print()
+        self._section_header("TASK ASSIGNMENT")
+        console.print()
         
         # Get available agents
         available_agents = [
@@ -1045,7 +1649,9 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
 
     def list_tasks(self) -> None:
         """List pending and completed tasks."""
-        console.print("\n[bold cyan]═ TASK STATUS ═[/bold cyan]\n")
+        console.print()
+        self._section_header("TASK STATUS")
+        console.print()
         
         tasks_by_agent = agent_manager.get_all_completed_tasks()
         
@@ -1062,7 +1668,9 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
 
     def show_task_results(self, agent_id: str = None) -> None:
         """Show detailed task results."""
-        console.print("\n[bold cyan]═ TASK RESULTS ═[/bold cyan]\n")
+        console.print()
+        self._section_header("TASK RESULTS")
+        console.print()
         
         if agent_id:
             if agent_id not in agent_manager.agents:
@@ -1096,3 +1704,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+

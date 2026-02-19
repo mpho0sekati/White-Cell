@@ -272,6 +272,192 @@ Provide a JSON response with:
                 "should_prevent": False
             }
 
+    def blue_team_exercise(self, scenario: str = "") -> str:
+        """
+        Conduct a Blue Team (defensive) security exercise.
+
+        Args:
+            scenario: Specific scenario or prompt for the blue team exercise
+
+        Returns:
+            Blue team defense strategy and recommendations
+        """
+        if not self.is_configured():
+            return "Groq API not configured. Please configure to enable blue team exercises."
+
+        try:
+            system_prompt = """You are a cybersecurity Blue Team expert conducting defensive security exercises. 
+            Provide comprehensive defensive strategies, mitigation techniques, and security hardening recommendations.
+            Focus on detection, prevention, and rapid response to security threats.
+            Format your response with clear sections and actionable steps."""
+
+            user_message = f"""Conduct a Blue Team (defensive) security exercise.
+
+Scenario/Focus: {scenario if scenario else 'General defensive security hardening'}
+
+Provide:
+1. Current defensive posture assessment
+2. Key vulnerabilities and gaps to address
+3. Detection strategy and monitoring setup
+4. Incident response procedures
+5. Hardening recommendations
+6. Testing plan to validate defenses
+7. Security awareness training focus areas
+
+Be specific and technical in your recommendations."""
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.4,
+                max_tokens=1500,
+            )
+
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Error conducting blue team exercise: {str(e)}"
+
+    def red_team_exercise(self, scenario: str = "") -> str:
+        """
+        Conduct a Red Team (offensive) security exercise.
+
+        Args:
+            scenario: Specific scenario or prompt for the red team exercise
+
+        Returns:
+            Red team attack strategy and recommendations
+        """
+        if not self.is_configured():
+            return "Groq API not configured. Please configure to enable red team exercises."
+
+        try:
+            system_prompt = """You are a cybersecurity Red Team expert conducting authorized offensive security exercises. 
+            Provide comprehensive attack simulation strategies, exploitation techniques, and penetration testing methodologies.
+            Focus on reconnaissance, vulnerability assessment, and exploitation paths.
+            Format your response with clear sections and logical attack sequences.
+            Note: This is for authorized security testing only."""
+
+            user_message = f"""Conduct a Red Team (offensive) security exercise for authorized testing.
+
+Scenario/Focus: {scenario if scenario else 'General network and application penetration testing'}
+
+Provide:
+1. Reconnaissance methodology and targets to probe
+2. Initial access vectors and techniques
+3. Lateral movement strategies
+4. Privilege escalation paths
+5. Data exfiltration techniques
+6. Persistence mechanisms (for testing)
+7. Evasion tactics to avoid detection
+8. Impact assessment criteria
+
+Be specific about methodologies and tools that would be used in authorized penetration testing.
+Include MITRE ATT&CK framework mapping where applicable."""
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.4,
+                max_tokens=1500,
+            )
+
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Error conducting red team exercise: {str(e)}"
+
+    def team_battle_scenario(self, threat_scenario: str = "") -> dict:
+        """
+        Run a Blue Team vs Red Team battle scenario.
+
+        Args:
+            threat_scenario: The security scenario to evaluate
+
+        Returns:
+            Dictionary with both blue and red team strategies
+        """
+        if not self.is_configured():
+            return {
+                "status": "unconfigured",
+                "message": "Groq API not configured. Please configure to enable team battle scenarios."
+            }
+
+        try:
+            # Get blue team defense
+            blue_response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a Blue Team expert. Design defensive measures for the given scenario."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"""Scenario: {threat_scenario if threat_scenario else 'Ransomware attack on enterprise infrastructure'}
+
+For this scenario, provide:
+1. Detection mechanisms
+2. Prevention measures
+3. Containment strategy
+4. Recovery plan
+5. Monitoring approach
+
+Be concise and tactical."""
+                    }
+                ],
+                temperature=0.3,
+                max_tokens=800,
+            )
+
+            # Get red team offense
+            red_response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a Red Team expert. Design attack vectors for the given scenario. This is for authorized testing."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"""Scenario: {threat_scenario if threat_scenario else 'Ransomware attack on enterprise infrastructure'}
+
+For this scenario, provide:
+1. Initial access methods
+2. Propagation techniques
+3. Persistence mechanisms
+4. Evasion tactics
+5. Impact objectives
+
+Be concise and tactical."""
+                    }
+                ],
+                temperature=0.3,
+                max_tokens=800,
+            )
+
+            return {
+                "status": "success",
+                "scenario": threat_scenario or "General security scenario",
+                "blue_team": {
+                    "role": "Defense",
+                    "strategy": blue_response.choices[0].message.content
+                },
+                "red_team": {
+                    "role": "Offense",
+                    "strategy": red_response.choices[0].message.content
+                }
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": str(e)
+            }
+
 
 # Global Groq client instance
 groq_client = GroqClient()

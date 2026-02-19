@@ -189,7 +189,7 @@ class AgentLearning:
             for technique_name, outcomes in self.knowledge_base["techniques"].items():
                 for outcome in outcomes:
                     if outcome.get("threat_type") == threat_type:
-                        if threat_type in [t for t in technique_stats]:
+                        if technique_name in technique_stats:
                             if outcome.get("success"):
                                 technique_stats[technique_name]["successes"] += 1
 
@@ -281,12 +281,7 @@ class AgentLearning:
                 Previously effective techniques: {techniques_str}.
                 Provide a brief actionable recommendation."""
 
-                response = groq_client.client.messages.create(
-                    model="mixtral-8x7b-32768",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=200
-                )
-                rec["ai_recommendation"] = response.content[0].text
+                rec["ai_recommendation"] = groq_client.get_explanation(prompt)
             except Exception:
                 pass
 

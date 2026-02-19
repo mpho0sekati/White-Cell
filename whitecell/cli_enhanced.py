@@ -38,6 +38,8 @@ from whitecell.state import global_state
 from whitecell.command_mode import create_risk_table
 from whitecell.agent import agent_manager
 from whitecell.config import load_config, set_groq_api_key, get_groq_api_key, validate_groq_api_key
+from whitecell.groq_client import groq_client
+from whitecell.self_improve import self_improver
 
 console = Console()
 
@@ -55,13 +57,14 @@ COMMAND_ALIASES = {
     "q": "exit",
     "ag": "agent",
     "d": "dashboard",
+    "p": "peek",
 }
 
 # Quick command suggestions based on context
 CONTEXT_SUGGESTIONS = {
     "threat": "Try 'analyze <threat>' or 'search <term>'",
     "logs": "Try 'export csv' or 'search <threat>'",
-    "agent": "Try 'agent deploy <name>' or 'agent status'",
+    "agent": "Try 'agent blue <scenario>' or 'agent red <scenario>'",
     "help": "Type 'help' for full command list",
 }
 
@@ -174,6 +177,98 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         
         console.print(layout)
 
+    def display_peek_window(self, refresh_seconds: float = 1.0) -> None:
+        """Display a continuously updating live monitoring window."""
+        if refresh_seconds <= 0:
+            refresh_seconds = 1.0
+
+        def build_layout() -> Layout:
+            logs = get_session_logs()
+            recent_logs = logs[-6:]
+            recent_events = agent_manager.global_log[-8:]
+            agent_stats = agent_manager.get_global_statistics()
+            running_agents = agent_stats.get("running_agents", 0)
+            total_agents = agent_stats.get("total_agents", 0)
+            command_mode = "ACTIVE" if self.state.command_mode else "INACTIVE"
+
+            layout = Layout()
+            layout.split_column(
+                Layout(name="header", size=3),
+                Layout(name="body"),
+                Layout(name="footer", size=3),
+            )
+            layout["body"].split_row(
+                Layout(name="left", ratio=1),
+                Layout(name="right", ratio=2),
+            )
+            layout["right"].split_column(
+                Layout(name="logs"),
+                Layout(name="events"),
+            )
+
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            header_text = f"[bold cyan]WHITE CELL PEEK WINDOW[/bold cyan]  [dim]{now}[/dim]"
+            layout["header"].update(Panel(header_text, border_style="cyan"))
+
+            summary = (
+                f"[bold]System Snapshot[/bold]\n"
+                f"Command Mode: [yellow]{command_mode}[/yellow]\n"
+                f"Running Agents: [green]{running_agents}/{total_agents}[/green]\n"
+                f"Threat Logs: [red]{len(logs)}[/red]\n"
+                f"Preventions: [green]{agent_stats.get('total_prevented', 0)}[/green]\n"
+                f"Checks Performed: [cyan]{agent_stats.get('total_checks_performed', 0)}[/cyan]"
+            )
+            layout["left"].update(Panel(summary, title="Live Status", border_style="green"))
+
+            logs_table = Table(title="Recent Threat Logs", show_header=True, header_style="bold magenta")
+            logs_table.add_column("Time", style="cyan", width=19)
+            logs_table.add_column("Type", style="yellow", width=18)
+            logs_table.add_column("Risk", style="red", width=8)
+            logs_table.add_column("Input", width=40)
+            if recent_logs:
+                for log in recent_logs:
+                    logs_table.add_row(
+                        str(log.get("timestamp", ""))[:19],
+                        str(log.get("threat_type", "unknown")),
+                        str(log.get("risk_score", "-")),
+                        str(log.get("user_input", ""))[:40],
+                    )
+            else:
+                logs_table.add_row("-", "No threats logged yet", "-", "-")
+            layout["right"]["logs"].update(logs_table)
+
+            events_table = Table(title="Recent Agent Events", show_header=True, header_style="bold magenta")
+            events_table.add_column("Time", style="cyan", width=19)
+            events_table.add_column("Event", style="yellow", width=18)
+            events_table.add_column("Agent", style="green", width=16)
+            events_table.add_column("Detail", width=36)
+            if recent_events:
+                for ev in recent_events:
+                    data = ev.get("data", {}) if isinstance(ev.get("data", {}), dict) else {}
+                    detail = ev.get("action") or ev.get("threat_type") or data.get("threat_type") or ""
+                    agent_id = ev.get("agent_id") or data.get("agent_id") or "-"
+                    events_table.add_row(
+                        str(ev.get("timestamp", ""))[:19],
+                        str(ev.get("event", "unknown")),
+                        str(agent_id),
+                        str(detail)[:36],
+                    )
+            else:
+                events_table.add_row("-", "No agent events yet", "-", "-")
+            layout["right"]["events"].update(events_table)
+
+            footer_text = f"[dim]Refresh: {refresh_seconds:.1f}s | Press Ctrl+C to close peek window[/dim]"
+            layout["footer"].update(Align.center(footer_text))
+            return layout
+
+        try:
+            with Live(build_layout(), refresh_per_second=4, console=console, screen=False) as live:
+                while True:
+                    time.sleep(refresh_seconds)
+                    live.update(build_layout())
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Peek window closed[/yellow]")
+
     def display_help(self) -> None:
         """Display comprehensive help with categories."""
         console.clear()
@@ -197,6 +292,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             ("exit", "q", "Exit the application"),
             ("status", "st", "Display system status"),
             ("dashboard", "d", "Show live dashboard view"),
+            ("peek", "p", "Open live peek monitoring window"),
             ("clear", "c", "Exit Command Mode"),
         ]
         
@@ -236,6 +332,11 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             ("agent status", "View all agents status"),
             ("agent threats <name> [limit]", "View agent-specific threats"),
             ("agent configure", "Setup GROQ API key"),
+            ("agent blue <scenario>", "Run Blue Team defensive strategy"),
+            ("agent red <scenario>", "Run Red Team authorized simulation"),
+            ("agent battle <scenario>", "Run Blue vs Red scenario"),
+            ("agent ask <prompt>", "General AI cybersecurity prompt"),
+            ("agent evolve <cmd>", "Autonomous self-improvement controls"),
         ]
         
         for cmd, desc in agent_commands:
@@ -269,6 +370,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             ("5", "Configure GROQ AI", "Setup API key (optional)"),
             ("6", "View Logs", "Recent threat logs"),
             ("7", "Export Data", "Save logs to file"),
+            ("8", "Peek Window", "Continuous live monitoring"),
             ("0", "Back to CLI", "Return to command line"),
         ]
         
@@ -278,7 +380,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         
         console.print(menu_table)
         
-        choice = Prompt.ask("\n[cyan]Select option[/cyan]", choices=["0", "1", "2", "3", "4", "5", "6", "7"])
+        choice = Prompt.ask("\n[cyan]Select option[/cyan]", choices=["0", "1", "2", "3", "4", "5", "6", "7", "8"])
         return choice
 
     def handle_menu_selection(self, choice: str) -> bool:
@@ -300,6 +402,8 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             self.display_logs(10)
         elif choice == "7":
             self.export_logs_interactive()
+        elif choice == "8":
+            self.display_peek_window()
         elif choice == "0":
             return True
         
@@ -578,7 +682,7 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
                 command = self.expand_alias(command)
                 
                 # Handle built-in commands
-                if command in ["exit", "help", "threats", "status", "logs", "search", "analyze", "export", "clear", "agent", "dashboard"]:
+                if command in ["exit", "help", "threats", "status", "logs", "search", "analyze", "export", "clear", "agent", "dashboard", "peek"]:
                     result = self.handle_command(command, args)
                     if result is False:
                         break
@@ -609,6 +713,13 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
                 self.display_dashboard()
             except KeyboardInterrupt:
                 console.print("\n[yellow]Dashboard closed[/yellow]")
+        elif command == "peek":
+            try:
+                refresh_seconds = float(args[0]) if args else 1.0
+            except ValueError:
+                console.print("[yellow]Usage: peek [refresh_seconds][/yellow]")
+                return True
+            self.display_peek_window(refresh_seconds)
         elif command == "logs":
             limit = int(args[0]) if args and args[0].isdigit() else 10
             self.display_logs(limit)
@@ -638,10 +749,12 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
     def handle_agent_command(self, args: list) -> None:
         """Handle agent commands."""
         if not args:
-            console.print("[cyan]Agent commands: deploy, stop, status, threats, configure[/cyan]")
+            console.print("[cyan]Agent commands: deploy, stop, status, threats, configure, blue, red, battle, ask, evolve[/cyan]")
+            console.print("[dim]Evolve cmds: start [sec], stop, status, generate, review [id], approve <id>, apply <id> <token>, reject <id>[/dim]")
             return
         
         subcommand = args[0]
+        prompt_text = " ".join(args[1:]).strip()
         
         if subcommand == "deploy":
             self.deploy_agent_interactive()
@@ -649,7 +762,159 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             self.configure_groq_api()
         elif subcommand == "status":
             self.display_status()
-        # Add more as needed
+        elif subcommand == "blue":
+            self.run_agent_ai_prompt("blue", prompt_text)
+        elif subcommand == "red":
+            self.run_agent_ai_prompt("red", prompt_text)
+        elif subcommand == "battle":
+            self.run_agent_ai_prompt("battle", prompt_text)
+        elif subcommand == "ask":
+            self.run_agent_ai_prompt("ask", prompt_text)
+        elif subcommand == "evolve":
+            self.handle_self_improve_command(args[1:])
+        else:
+            console.print(f"[yellow]Unknown agent subcommand: {subcommand}[/yellow]")
+
+    def handle_self_improve_command(self, args: list) -> None:
+        """Handle guarded autonomous self-improvement commands."""
+        if not args:
+            console.print("[yellow]Usage: agent evolve <start|stop|status|generate|review|approve|apply|reject>[/yellow]")
+            return
+
+        cmd = args[0].lower()
+
+        if cmd == "start":
+            interval = 120
+            if len(args) > 1 and args[1].isdigit():
+                interval = int(args[1])
+            self_improver.start(interval)
+            console.print(f"[green]Self-improvement started[/green] (interval={interval}s).")
+            return
+
+        if cmd == "stop":
+            self_improver.stop()
+            console.print("[yellow]Self-improvement stopped.[/yellow]")
+            return
+
+        if cmd == "status":
+            status = self_improver.status()
+            table = Table(title="Self-Improvement Status", show_header=True, header_style="bold magenta")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="green")
+            for key in ["running", "interval_seconds", "last_cycle", "total_proposals", "pending", "approved", "applied"]:
+                table.add_row(key, str(status.get(key)))
+            console.print(table)
+            return
+
+        if cmd == "generate":
+            proposal = self_improver.generate_proposal()
+            if not proposal:
+                console.print("[yellow]No new proposal generated right now.[/yellow]")
+                return
+            console.print(f"[green]Generated proposal:[/green] {proposal['id']} - {proposal['title']}")
+            return
+
+        if cmd == "review":
+            if len(args) > 1:
+                proposal = self_improver.get_proposal(args[1])
+                if not proposal:
+                    console.print(f"[yellow]Proposal not found: {args[1]}[/yellow]")
+                    return
+                console.print(json.dumps(proposal, indent=2))
+                return
+
+            proposals = self_improver.list_proposals(limit=10)
+            if not proposals:
+                console.print("[yellow]No proposals available.[/yellow]")
+                return
+            table = Table(title="Recent Self-Improvement Proposals", show_header=True, header_style="bold magenta")
+            table.add_column("ID", style="cyan")
+            table.add_column("Status", style="yellow")
+            table.add_column("Risk", style="red")
+            table.add_column("Title", width=60)
+            for p in proposals:
+                table.add_row(p.get("id", "-"), p.get("status", "-"), p.get("risk", "-"), p.get("title", "-"))
+            console.print(table)
+            return
+
+        if cmd == "approve":
+            if len(args) < 2:
+                console.print("[yellow]Usage: agent evolve approve <proposal_id>[/yellow]")
+                return
+            token = self_improver.approve_proposal(args[1])
+            if not token:
+                console.print("[red]Approval failed. Check proposal ID and status.[/red]")
+                return
+            console.print(f"[green]Approved[/green] {args[1]}")
+            console.print(f"[bold yellow]Approval token:[/bold yellow] {token}")
+            console.print("[dim]Apply with: agent evolve apply <proposal_id> <token>[/dim]")
+            return
+
+        if cmd == "apply":
+            if len(args) < 3:
+                console.print("[yellow]Usage: agent evolve apply <proposal_id> <approval_token>[/yellow]")
+                return
+            if self_improver.apply_proposal(args[1], args[2]):
+                console.print(f"[green]Applied proposal[/green] {args[1]}.")
+            else:
+                console.print("[red]Apply failed. Verify approval token, status, and safety checks.[/red]")
+            return
+
+        if cmd == "reject":
+            if len(args) < 2:
+                console.print("[yellow]Usage: agent evolve reject <proposal_id>[/yellow]")
+                return
+            if self_improver.reject_proposal(args[1]):
+                console.print(f"[green]Rejected proposal[/green] {args[1]}.")
+            else:
+                console.print("[red]Reject failed. Check proposal ID and status.[/red]")
+            return
+
+        console.print(f"[yellow]Unknown evolve command: {cmd}[/yellow]")
+
+    def run_agent_ai_prompt(self, mode: str, prompt_text: str) -> None:
+        """Run AI-powered agent prompts for blue/red/battle/general scenarios."""
+        if not prompt_text:
+            prompt_text = Prompt.ask("[cyan]Enter scenario/prompt[/cyan]").strip()
+            if not prompt_text:
+                console.print("[yellow]Prompt cannot be empty.[/yellow]")
+                return
+
+        if not groq_client.is_configured():
+            console.print("[yellow]Groq API is not configured. Run 'agent configure' first.[/yellow]")
+            return
+
+        if mode == "blue":
+            with console.status("[cyan]Running Blue Team exercise...[/cyan]", spinner="dots"):
+                result = groq_client.blue_team_exercise(prompt_text)
+            console.print(Panel(result, title="Blue Team Strategy", border_style="cyan"))
+            return
+
+        if mode == "red":
+            with console.status("[cyan]Running Red Team exercise...[/cyan]", spinner="dots"):
+                result = groq_client.red_team_exercise(prompt_text)
+            console.print(Panel(result, title="Red Team Strategy", border_style="red"))
+            return
+
+        if mode == "battle":
+            with console.status("[cyan]Running Blue vs Red scenario...[/cyan]", spinner="dots"):
+                result = groq_client.team_battle_scenario(prompt_text)
+            if not isinstance(result, dict):
+                console.print(Panel(str(result), title="Battle Scenario", border_style="yellow"))
+                return
+            if result.get("status") != "success":
+                console.print(Panel(result.get("message", "Failed to run team battle scenario."), title="Battle Scenario Error", border_style="red"))
+                return
+
+            blue_strategy = result.get("blue_team", {}).get("strategy", "No blue team strategy returned.")
+            red_strategy = result.get("red_team", {}).get("strategy", "No red team strategy returned.")
+            console.print(Panel(blue_strategy, title="Blue Team (Defense)", border_style="cyan"))
+            console.print(Panel(red_strategy, title="Red Team (Offense)", border_style="red"))
+            return
+
+        with console.status("[cyan]Querying cybersecurity assistant...[/cyan]", spinner="dots"):
+            result = groq_client.get_explanation(prompt_text)
+        console.print(Panel(result, title="Agent Response", border_style="green"))
 
     def handle_task_command(self, args: list) -> None:
         """Handle task commands."""

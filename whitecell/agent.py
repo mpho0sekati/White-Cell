@@ -247,12 +247,12 @@ class Agent:
         threat_info = detect_threat(threat_data)
         scan_results = {
             "threat_detected": threat_info is not None,
-            "threat_type": threat_info[0] if threat_info else None,
+            "threat_type": threat_info.get("threat_type") if threat_info else None,
             "timestamp": datetime.now().isoformat()
         }
 
         if threat_info:
-            risk_info = calculate_risk(threat_info[0], threat_data)
+            risk_info = calculate_risk(threat_info)
             scan_results["risk_score"] = risk_info.get("risk_score")
             scan_results["risk_level"] = risk_info.get("risk_level")
             
@@ -262,7 +262,7 @@ class Agent:
                 "threat": threat_data,
                 "source": f"task:{task.task_id}",
                 "agent_id": self.agent_id,
-                "threat_type": threat_info[0],
+                "threat_type": threat_info.get("threat_type"),
                 "risk_score": risk_info.get("risk_score"),
             }
             self.threats_detected.append(threat_record)
@@ -404,20 +404,22 @@ class Agent:
         }
 
         # Try to detect threat type from text
-        threat_type = detect_threat(threat_text)
+        threat_info = detect_threat(threat_text)
 
-        if threat_type:
-            threat_data["threat_type"] = threat_type[0]
+        if threat_info:
+            threat_type = threat_info.get("threat_type")
+            threat_data["threat_type"] = threat_type
             
             # Calculate risk
-            risk_score = calculate_risk(threat_type[0], threat_text)
-            threat_data["risk_score"] = risk_score
+            risk_info = calculate_risk(threat_info)
+            threat_score = risk_info.get("risk_score", 0)
+            threat_data["risk_score"] = threat_score
 
             # Check if we should prevent this threat
-            should_prevent = risk_score > get_config_value("threat_threshold", 50)
+            should_prevent = threat_score > get_config_value("threat_threshold", 50)
 
             if should_prevent:
-                threat_data["prevented"] = self._attempt_prevention(threat_type[0], threat_data)
+                threat_data["prevented"] = self._attempt_prevention(threat_type, threat_data)
 
         self.threats_detected.append(threat_data)
 
@@ -449,7 +451,7 @@ class Agent:
                     threat_data["prevented_by"] = prevention_action
                     
                     if self.on_prevention_action:
-                        self.on_prevention_action(threat_type, prevention_action)
+                        self.on_prevention_action(self.agent_id, threat_type, prevention_action)
                     
                     return True
             else:
@@ -459,7 +461,7 @@ class Agent:
                     threat_data["prevented_by"] = prevention_action
                     
                     if self.on_prevention_action:
-                        self.on_prevention_action(threat_type, prevention_action)
+                        self.on_prevention_action(self.agent_id, threat_type, prevention_action)
                     
                     return True
         except Exception as e:
@@ -705,14 +707,31 @@ class AgentManager:
             "data": threat_data
         })
 
-    def _log_prevention_action(self, threat_type: str, action: str):
-        """Log a prevention action globally."""
-        self.global_log.append({
+    def _log_prevention_action(self, *args):
+        """Log a prevention action globally.
+
+        Supports both call styles for compatibility:
+        - (agent_id, threat_type, action)
+        - (threat_type, action)
+        """
+        if len(args) == 3:
+            agent_id, threat_type, action = args
+        elif len(args) == 2:
+            threat_type, action = args
+            agent_id = None
+        else:
+            raise TypeError("_log_prevention_action expects 2 or 3 positional arguments")
+
+        event = {
             "event": "prevention_action",
             "timestamp": datetime.now().isoformat(),
             "threat_type": threat_type,
             "action": action
-        })
+        }
+        if agent_id:
+            event["agent_id"] = agent_id
+
+        self.global_log.append(event)
 
     def assign_task_to_agent(self, agent_id: str, task: Task) -> bool:
         """

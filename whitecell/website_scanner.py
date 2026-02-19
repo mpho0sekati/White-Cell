@@ -86,7 +86,7 @@ class WebsiteScanner:
             results["findings"].append({
                 "type": "known_threat",
                 "severity": "high",
-                "description": f"Domain matches known threat pattern: {threat_detection[0]}",
+                "description": f"Domain matches known threat pattern: {threat_detection[0].get('threat_type', 'unknown')}",
                 "weakness": "Domain associated with malicious activity",
                 "recommendation": "Investigate immediately"
             })
@@ -209,14 +209,8 @@ class WebsiteScanner:
             Format as JSON array of {{type, severity, description, recommendation}}.
             Focus on: CSP, X-Frame-Options, X-Content-Type-Options, HSTS, X-XSS-Protection."""
 
-            response = groq_client.client.messages.create(
-                model="mixtral-8x7b-32768",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=500
-            )
-
             # Try to parse response as JSON
-            content = response.content[0].text
+            content = groq_client.get_explanation(prompt)
             if "[" in content:
                 json_str = content[content.index("["):content.rindex("]") + 1]
                 analysis = json.loads(json_str)

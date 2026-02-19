@@ -25,7 +25,7 @@ from whitecell.system_guard import scan_system
 console = Console()
 
 GROQ_FEATURE_FLAG = "WHITECELL_ENABLE_GROQ"
-BUILTIN_COMMANDS = ("exit", "help", "status", "logs", "clear", "explain", "strategy", "crew", "immune", "brain")
+BUILTIN_COMMANDS = ("exit", "help", "status", "logs", "clear", "explain", "strategy", "crew", "immune", "brain", "team")
 
 
 class WhiteCellCLI:
@@ -123,6 +123,8 @@ class WhiteCellCLI:
         table.add_row("immune report", "Show recent immune scan summaries")
         table.add_row("brain status", "Show main-agent memory storage status")
         table.add_row("brain sync", "Safely sync brain memory to Google Drive (optional)")
+        table.add_row("team blue <scenario>", "Generate defensive blue-team playbook")
+        table.add_row("team red <scenario>", "Generate adversary emulation red-team playbook")
         table.add_row("exit", "Exit the application")
 
         console.print(table)
@@ -322,6 +324,102 @@ class WhiteCellCLI:
                 live.update(_build_activity_table())
                 time.sleep(0.25)
 
+
+    def build_team_plan(self, team: str, scenario: str) -> dict[str, list[str] | str]:
+        """Build a practical blue/red team plan from scenario and learned techniques."""
+
+        scenario_lower = scenario.lower()
+        collective = self.state.get_collective_techniques()
+
+        if team == "blue":
+            objectives = [
+                "Contain active risk and protect business-critical services",
+                "Increase visibility and preserve forensic evidence",
+                "Close detected control gaps and validate recovery",
+            ]
+            actions = [
+                "Validate incident scope (affected hosts, identities, data paths)",
+                "Isolate impacted endpoints/segments and revoke risky sessions",
+                "Deploy short-term detections for key indicators from this scenario",
+                "Capture volatile evidence (process, network, auth logs) before cleanup",
+                "Hunt across environment for lateral movement and persistence",
+                "Patch/harden root cause and enforce compensating controls",
+                "Run post-incident review with timeline and remediation owners",
+            ]
+            if "phishing" in scenario_lower:
+                actions.insert(2, "Block sender domains/URLs and reset potentially exposed credentials")
+            if "ransomware" in scenario_lower:
+                actions.insert(2, "Disable affected file shares and validate backup integrity before restore")
+            if "data breach" in scenario_lower or "exfil" in scenario_lower:
+                actions.insert(2, "Trigger breach-notification/legal workflow and data-loss triage")
+
+            return {
+                "team": "BLUE",
+                "scenario": scenario,
+                "objectives": objectives,
+                "actions": actions,
+                "techniques": collective,
+            }
+
+        objectives = [
+            "Safely emulate realistic attacker behavior for this scenario",
+            "Measure defensive detection/response coverage and time-to-contain",
+            "Produce evidence-based improvement backlog for security operations",
+        ]
+        actions = [
+            "Define rules of engagement, approvals, and in-scope assets",
+            "Map scenario to ATT&CK-style tactics (initial access -> impact)",
+            "Run controlled emulation with harmless payloads and full logging",
+            "Record which controls alerted, which missed, and response timing",
+            "Debrief with defenders and prioritize fixes by risk",
+            "Re-test after remediation to validate measurable improvement",
+        ]
+        if "phishing" in scenario_lower:
+            actions.insert(3, "Execute phishing simulation with credential-capture controls disabled")
+        if "ransomware" in scenario_lower:
+            actions.insert(3, "Emulate encryption-impact phase with non-destructive canary files")
+        if "lateral" in scenario_lower:
+            actions.insert(3, "Emulate credential reuse and remote execution paths across segments")
+
+        return {
+            "team": "RED",
+            "scenario": scenario,
+            "objectives": objectives,
+            "actions": actions,
+            "techniques": collective,
+        }
+
+    def display_team_plan(self, team: str, scenario: str) -> None:
+        """Render blue/red team guidance in a structured table."""
+
+        plan = self.build_team_plan(team, scenario)
+        color = "cyan" if plan["team"] == "BLUE" else "red"
+
+        header = Panel.fit(
+            f"[bold]{plan['team']} TEAM PLAYBOOK[/bold]\n"
+            f"[bold]Scenario:[/bold] {plan['scenario']}",
+            border_style=color,
+        )
+        console.print(header)
+
+        objective_table = Table(title="Mission Objectives", show_header=True, header_style="bold magenta")
+        objective_table.add_column("#", style="cyan", width=3)
+        objective_table.add_column("Objective", style="green")
+        for idx, objective in enumerate(plan["objectives"], start=1):
+            objective_table.add_row(str(idx), objective)
+        console.print(objective_table)
+
+        actions_table = Table(title="Operational Actions", show_header=True, header_style="bold magenta")
+        actions_table.add_column("#", style="cyan", width=3)
+        actions_table.add_column("Action", style="white")
+        for idx, action in enumerate(plan["actions"], start=1):
+            actions_table.add_row(str(idx), action)
+        console.print(actions_table)
+
+        techniques = plan.get("techniques", [])
+        if techniques:
+            console.print(f"[bold cyan]Learned Techniques to Reuse:[/bold cyan] {', '.join(techniques)}")
+
     def handle_command(self, command: str, args: list[str]) -> bool | None:
         """
         Handle built-in CLI commands.
@@ -449,6 +547,24 @@ class WhiteCellCLI:
                 return True
 
             console.print("[yellow]Unknown crew command. Use spawn, report, learn, memory, or watch.[/yellow]")
+            return True
+
+        if command == "team":
+            if len(args) < 2:
+                console.print("[yellow]Usage: team <blue|red> <scenario>[/yellow]")
+                return True
+
+            team_type = args[0].lower()
+            if team_type not in {"blue", "red"}:
+                console.print("[yellow]Team must be blue or red.[/yellow]")
+                return True
+
+            scenario = " ".join(args[1:]).strip()
+            if not scenario:
+                console.print("[yellow]Scenario cannot be empty.[/yellow]")
+                return True
+
+            self.display_team_plan(team_type, scenario)
             return True
 
         if command == "brain":

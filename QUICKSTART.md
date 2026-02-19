@@ -119,6 +119,18 @@ WhiteCell> immune report
 ```
 Displays recent immune scan summaries for this session.
 
+### Team Blue Prompt
+```
+WhiteCell> team blue ransomware spreading via SMB in production
+```
+Generates a practical defensive blue-team playbook with containment and recovery actions.
+
+### Team Red Prompt
+```
+WhiteCell> team red phishing pretext targeting finance approvals
+```
+Generates a realistic red-team emulation plan with safe test workflow steps.
+
 ### Brain Status
 ```
 WhiteCell> brain status

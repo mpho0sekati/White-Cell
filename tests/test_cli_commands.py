@@ -121,6 +121,24 @@ class CLIGroqCommandTests(unittest.TestCase):
         self.assertTrue(sync_result)
         mock_print.assert_called()
 
+    @patch("whitecell.cli.console.print")
+    def test_team_blue_and_red_commands(self, mock_print):
+        blue = self.cli.handle_command("team", ["blue", "ransomware", "in", "finance", "network"])
+        red = self.cli.handle_command("team", ["red", "phishing", "against", "helpdesk", "workflow"])
+
+        self.assertTrue(blue)
+        self.assertTrue(red)
+        mock_print.assert_called()
+
+    @patch("whitecell.cli.console.print")
+    def test_team_command_validates_usage(self, mock_print):
+        result_missing = self.cli.handle_command("team", ["blue"])
+        result_bad_team = self.cli.handle_command("team", ["purple", "scenario"])
+
+        self.assertTrue(result_missing)
+        self.assertTrue(result_bad_team)
+        mock_print.assert_called()
+
 
 if __name__ == "__main__":
     unittest.main()

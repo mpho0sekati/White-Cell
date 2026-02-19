@@ -119,6 +119,18 @@ WhiteCell> immune report
 ```
 Displays recent immune scan summaries for this session.
 
+### Brain Status
+```
+WhiteCell> brain status
+```
+Shows where main-agent memory is stored and how many techniques have been learned.
+
+### Brain Sync
+```
+WhiteCell> brain sync
+```
+Safely syncs the local brain file to Google Drive when configured.
+
 ### Clear Crisis Mode
 ```
 WhiteCell> clear
@@ -237,6 +249,33 @@ export WHITECELL_ENABLE_GROQ=0
 # Disable Groq commands (Windows PowerShell)
 $env:WHITECELL_ENABLE_GROQ="0"
 ```
+
+Agent brain identity (default: `main-agent`):
+```bash
+# macOS/Linux
+export WHITECELL_AGENT_NAME=my-main-agent
+
+# Windows PowerShell
+$env:WHITECELL_AGENT_NAME="my-main-agent"
+```
+
+Optional Google Drive brain sync (service-account based, least privilege):
+```bash
+# macOS/Linux
+export WHITECELL_GOOGLE_DRIVE_ENABLED=1
+export WHITECELL_GOOGLE_DRIVE_FOLDER_ID=your_drive_folder_id
+export WHITECELL_GOOGLE_SERVICE_ACCOUNT_FILE=/secure/path/service-account.json
+
+# Windows PowerShell
+$env:WHITECELL_GOOGLE_DRIVE_ENABLED="1"
+$env:WHITECELL_GOOGLE_DRIVE_FOLDER_ID="your_drive_folder_id"
+$env:WHITECELL_GOOGLE_SERVICE_ACCOUNT_FILE="C:\secure\service-account.json"
+```
+
+Safety notes:
+- Use a dedicated service account with only `drive.file` scope.
+- Restrict file permissions on the service-account JSON.
+- Keep local brain files under `<project_root>/logs/brain/` protected by OS access controls.
 
 ## Troubleshooting
 

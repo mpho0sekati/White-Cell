@@ -112,6 +112,15 @@ class CLIGroqCommandTests(unittest.TestCase):
         self.assertIn("ioc-hunting", helper.get("techniques", []))
         mock_print.assert_called()
 
+    @patch("whitecell.cli.console.print")
+    def test_brain_status_and_sync_commands(self, mock_print):
+        status_result = self.cli.handle_command("brain", ["status"])
+        sync_result = self.cli.handle_command("brain", ["sync"])
+
+        self.assertTrue(status_result)
+        self.assertTrue(sync_result)
+        mock_print.assert_called()
+
 
 if __name__ == "__main__":
     unittest.main()

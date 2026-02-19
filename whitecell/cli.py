@@ -25,7 +25,7 @@ from whitecell.system_guard import scan_system
 console = Console()
 
 GROQ_FEATURE_FLAG = "WHITECELL_ENABLE_GROQ"
-BUILTIN_COMMANDS = ("exit", "help", "status", "logs", "clear", "explain", "strategy", "crew", "immune")
+BUILTIN_COMMANDS = ("exit", "help", "status", "logs", "clear", "explain", "strategy", "crew", "immune", "brain")
 
 
 class WhiteCellCLI:
@@ -35,6 +35,17 @@ class WhiteCellCLI:
         """Initialize the CLI with global state."""
         self.state = global_state
         initialize_logging()
+
+        agent_name = os.getenv("WHITECELL_AGENT_NAME", "main-agent")
+        drive_enabled = os.getenv("WHITECELL_GOOGLE_DRIVE_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
+        drive_folder = os.getenv("WHITECELL_GOOGLE_DRIVE_FOLDER_ID")
+        drive_service_account = os.getenv("WHITECELL_GOOGLE_SERVICE_ACCOUNT_FILE")
+        self.state.initialize_brain(
+            agent_name=agent_name,
+            google_drive_enabled=drive_enabled,
+            google_drive_folder_id=drive_folder,
+            google_service_account_file=drive_service_account,
+        )
 
     @staticmethod
     def suggest_command(command: str) -> str | None:
@@ -110,6 +121,8 @@ class WhiteCellCLI:
         table.add_row("crew watch [seconds]", "Live watch helper activity stream")
         table.add_row("immune scan", "Run a host-level immune scan on this system")
         table.add_row("immune report", "Show recent immune scan summaries")
+        table.add_row("brain status", "Show main-agent memory storage status")
+        table.add_row("brain sync", "Safely sync brain memory to Google Drive (optional)")
         table.add_row("exit", "Exit the application")
 
         console.print(table)
@@ -129,6 +142,7 @@ class WhiteCellCLI:
         status_table.add_row("Groq", self.groq_status_text())
         status_table.add_row("Immune Scans", str(len(self.state.immune_history)))
         status_table.add_row("Learned Techniques", str(len(self.state.get_collective_techniques())))
+        status_table.add_row("Brain Agent", self.state.brain_agent_name)
 
         console.print(status_table)
 
@@ -230,6 +244,27 @@ class WhiteCellCLI:
         collective = self.state.get_collective_techniques()
         if collective:
             console.print(f"[bold cyan]Collective Techniques:[/bold cyan] {', '.join(collective)}")
+
+
+    def display_brain_status(self) -> None:
+        """Display brain storage status and memory footprint."""
+
+        storage = self.state.brain_storage
+        if storage is None:
+            console.print("[yellow]Brain storage is not initialized.[/yellow]")
+            return
+
+        table = Table(title="Brain Memory Status", show_header=True, header_style="bold magenta")
+        table.add_column("Parameter", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Agent Name", self.state.brain_agent_name)
+        table.add_row("Memory Entries", str(len(self.state.helper_learning)))
+        table.add_row("Collective Techniques", str(len(self.state.get_collective_techniques())))
+        table.add_row("Local Brain File", str(storage.local_file))
+        table.add_row("Google Drive Enabled", "YES" if storage.config.google_drive_enabled else "NO")
+        table.add_row("Last Drive Sync", self.format_timestamp(self.state.brain_last_sync or ""))
+
+        console.print(table)
 
     def display_immune_report(self) -> None:
         """Display recent host immune-scan summaries."""
@@ -414,6 +449,25 @@ class WhiteCellCLI:
                 return True
 
             console.print("[yellow]Unknown crew command. Use spawn, report, learn, memory, or watch.[/yellow]")
+            return True
+
+        if command == "brain":
+            if not args:
+                console.print("[yellow]Usage: brain <status|sync>[/yellow]")
+                return True
+
+            subcommand = args[0].lower()
+            if subcommand == "status":
+                self.display_brain_status()
+                return True
+
+            if subcommand == "sync":
+                ok, message = self.state.sync_brain_to_google_drive()
+                color = "green" if ok else "yellow"
+                console.print(f"[{color}]{message}[/{color}]")
+                return True
+
+            console.print("[yellow]Unknown brain command. Use status or sync.[/yellow]")
             return True
 
         if command == "immune":

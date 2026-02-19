@@ -9,7 +9,10 @@ Author: White Cell Project
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
+
+from whitecell.brain_storage import BrainStorage, BrainStorageConfig
 
 
 @dataclass
@@ -31,6 +34,72 @@ class SessionState:
     helper_learning: list[dict[str, Any]] = field(default_factory=list)
     immune_history: list[dict[str, Any]] = field(default_factory=list)
     session_active: bool = True
+    brain_agent_name: str = "main-agent"
+    brain_storage: BrainStorage | None = None
+    brain_last_sync: str | None = None
+
+
+    def initialize_brain(
+        self,
+        agent_name: str = "main-agent",
+        local_dir: Path | None = None,
+        google_drive_enabled: bool = False,
+        google_drive_folder_id: str | None = None,
+        google_service_account_file: str | None = None,
+    ) -> None:
+        """Initialize persistent brain storage and load memory."""
+
+        self.brain_agent_name = agent_name
+        storage_dir = local_dir or (Path(__file__).parent.parent / "logs" / "brain")
+        config = BrainStorageConfig(
+            agent_name=agent_name,
+            local_dir=storage_dir,
+            google_drive_enabled=google_drive_enabled,
+            google_drive_folder_id=google_drive_folder_id,
+            google_service_account_file=google_service_account_file,
+        )
+        self.brain_storage = BrainStorage(config)
+
+        persisted = self.brain_storage.load()
+        learning_entries = persisted.get("helper_learning", [])
+        if isinstance(learning_entries, list):
+            self.helper_learning = [entry for entry in learning_entries if isinstance(entry, dict)]
+
+        self._rebuild_helper_techniques_from_memory()
+
+    def _rebuild_helper_techniques_from_memory(self) -> None:
+        """Re-apply memory techniques onto helper profiles."""
+
+        for helper in self.helper_crew:
+            helper["techniques"] = []
+
+        for memory in self.helper_learning:
+            helper_name = memory.get("helper", "helper")
+            techniques = memory.get("techniques", [])
+            helper = self.get_helper(helper_name)
+            if helper is None:
+                helper = self.spawn_helper(helper_name, "incident analyst")
+            existing = set(helper.get("techniques", []))
+            helper["techniques"] = sorted(existing.union(set(techniques)))
+
+    def persist_brain_memory(self) -> None:
+        """Write in-memory learning to configured storage."""
+
+        if self.brain_storage is None:
+            return
+        self.brain_storage.save({"helper_learning": self.helper_learning})
+
+    def sync_brain_to_google_drive(self) -> tuple[bool, str]:
+        """Push local brain file to Google Drive if configured."""
+
+        if self.brain_storage is None:
+            return False, "Brain storage not initialized"
+
+        self.persist_brain_memory()
+        ok, message = self.brain_storage.sync_to_google_drive()
+        if ok:
+            self.brain_last_sync = datetime.now().isoformat()
+        return ok, message
 
     def activate_command_mode(self, threat_info: dict[str, Any]) -> None:
         """
@@ -103,6 +172,7 @@ class SessionState:
             "techniques": normalized_techniques,
         }
         self.helper_learning.append(memory)
+        self.persist_brain_memory()
 
         existing = set(helper.get("techniques", []))
         helper["techniques"] = sorted(existing.union(normalized_techniques))

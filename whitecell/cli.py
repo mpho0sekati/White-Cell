@@ -8,10 +8,12 @@ Author: White Cell Project
 """
 
 import os
+import time
 from datetime import datetime
 from difflib import get_close_matches
 
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
@@ -22,7 +24,7 @@ from whitecell.state import global_state
 console = Console()
 
 GROQ_FEATURE_FLAG = "WHITECELL_ENABLE_GROQ"
-BUILTIN_COMMANDS = ("exit", "help", "status", "logs", "clear", "explain", "strategy")
+BUILTIN_COMMANDS = ("exit", "help", "status", "logs", "clear", "explain", "strategy", "crew")
 
 
 class WhiteCellCLI:
@@ -100,6 +102,9 @@ class WhiteCellCLI:
         table.add_row("clear", "Exit CRISIS MODE if active")
         table.add_row("explain <query>", "Optional Groq reasoning (placeholder response)")
         table.add_row("strategy <threat_type>", "Optional Groq strategy guidance (placeholder response)")
+        table.add_row("crew spawn <name> [role]", "Create a helper agent for incident support")
+        table.add_row("crew report", "Show helper crew status and recent activity")
+        table.add_row("crew watch [seconds]", "Live watch helper activity stream")
         table.add_row("exit", "Exit the application")
 
         console.print(table)
@@ -146,6 +151,75 @@ class WhiteCellCLI:
             logs_table.add_row(timestamp, threat_type, risk_score, risk_level, popia)
 
         console.print(logs_table)
+
+
+    def display_crew_report(self) -> None:
+        """Display helper crew roster and recent activity."""
+
+        if not self.state.helper_crew:
+            console.print("[yellow]No helpers spawned yet. Use: crew spawn <name> [role][/yellow]")
+            return
+
+        crew_table = Table(title="Helper Crew", show_header=True, header_style="bold magenta")
+        crew_table.add_column("Name", style="cyan")
+        crew_table.add_column("Role", style="green")
+        crew_table.add_column("Status", style="yellow")
+        crew_table.add_column("Tasks", style="red")
+
+        for helper in self.state.helper_crew:
+            crew_table.add_row(
+                helper.get("name", "helper"),
+                helper.get("role", "analyst"),
+                helper.get("status", "idle"),
+                str(helper.get("tasks_completed", 0)),
+            )
+
+        console.print(crew_table)
+
+        if self.state.helper_activity:
+            activity_table = Table(title="Recent Helper Activity", show_header=True, header_style="bold blue")
+            activity_table.add_column("Time", style="cyan")
+            activity_table.add_column("Helper", style="green")
+            activity_table.add_column("Activity", style="white")
+            activity_table.add_column("Status", style="yellow")
+
+            for event in self.state.helper_activity[-10:]:
+                activity_table.add_row(
+                    self.format_timestamp(event.get("timestamp", "")),
+                    event.get("helper", "helper"),
+                    event.get("activity", ""),
+                    event.get("status", "unknown"),
+                )
+            console.print(activity_table)
+
+    def display_crew_watch(self, duration_seconds: int = 8) -> None:
+        """Live-watch helper activity for a short duration."""
+
+        if duration_seconds < 1:
+            duration_seconds = 1
+
+        def _build_activity_table() -> Table:
+            table = Table(title="Helper Activity Watch", show_header=True, header_style="bold magenta")
+            table.add_column("Time", style="cyan")
+            table.add_column("Helper", style="green")
+            table.add_column("Activity", style="white")
+            table.add_column("Status", style="yellow")
+
+            rows = self.state.helper_activity[-12:] or [{"timestamp": "", "helper": "-", "activity": "No activity yet", "status": "idle"}]
+            for event in rows:
+                table.add_row(
+                    self.format_timestamp(event.get("timestamp", "")),
+                    event.get("helper", "-"),
+                    event.get("activity", ""),
+                    event.get("status", ""),
+                )
+            return table
+
+        with Live(_build_activity_table(), console=console, refresh_per_second=4) as live:
+            end_time = time.time() + duration_seconds
+            while time.time() < end_time:
+                live.update(_build_activity_table())
+                time.sleep(0.25)
 
     def handle_command(self, command: str, args: list[str]) -> bool | None:
         """
@@ -202,6 +276,42 @@ class WhiteCellCLI:
                 console.print("[yellow]Usage: strategy <threat_type>[/yellow]")
                 return True
             console.print(groq_client.get_strategy(threat_type))
+            return True
+
+        if command == "crew":
+            if not args:
+                console.print("[yellow]Usage: crew <spawn|report|watch> ...[/yellow]")
+                return True
+
+            subcommand = args[0].lower()
+
+            if subcommand == "spawn":
+                if len(args) < 2:
+                    console.print("[yellow]Usage: crew spawn <name> [role][/yellow]")
+                    return True
+                name = args[1]
+                role = " ".join(args[2:]).strip() or "incident analyst"
+
+                if self.state.get_helper(name):
+                    console.print(f"[yellow]Helper '{name}' already exists.[/yellow]")
+                    return True
+
+                self.state.spawn_helper(name, role)
+                console.print(f"[green]Helper spawned:[/green] {name} ({role})")
+                return True
+
+            if subcommand == "report":
+                self.display_crew_report()
+                return True
+
+            if subcommand == "watch":
+                watch_seconds = 8
+                if len(args) > 1 and args[1].isdigit():
+                    watch_seconds = int(args[1])
+                self.display_crew_watch(watch_seconds)
+                return True
+
+            console.print("[yellow]Unknown crew command. Use spawn, report, or watch.[/yellow]")
             return True
 
         return None

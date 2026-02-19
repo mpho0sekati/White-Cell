@@ -8,6 +8,7 @@ Author: White Cell Project
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 
@@ -25,6 +26,8 @@ class SessionState:
     command_mode: bool = False
     last_threat: dict[str, Any] = field(default_factory=dict)
     logs: list[dict[str, Any]] = field(default_factory=list)
+    helper_crew: list[dict[str, Any]] = field(default_factory=list)
+    helper_activity: list[dict[str, Any]] = field(default_factory=list)
     session_active: bool = True
 
     def activate_command_mode(self, threat_info: dict[str, Any]) -> None:
@@ -37,6 +40,48 @@ class SessionState:
         self.command_mode = True
         self.last_threat = threat_info
         self.logs.append(threat_info)
+
+
+    def spawn_helper(self, name: str, role: str) -> dict[str, Any]:
+        """Create and register a helper agent for operational support."""
+
+        helper = {
+            "name": name,
+            "role": role,
+            "status": "idle",
+            "created_at": datetime.now().isoformat(),
+            "tasks_completed": 0,
+        }
+        self.helper_crew.append(helper)
+        self.record_helper_activity(name, f"spawned with role: {role}", "created")
+        return helper
+
+    def record_helper_activity(self, helper_name: str, activity: str, status: str) -> None:
+        """Record helper activity and update helper status."""
+
+        self.helper_activity.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "helper": helper_name,
+                "activity": activity,
+                "status": status,
+            }
+        )
+
+        for helper in self.helper_crew:
+            if helper.get("name") == helper_name:
+                helper["status"] = status
+                if status in {"resolved", "completed"}:
+                    helper["tasks_completed"] = helper.get("tasks_completed", 0) + 1
+                break
+
+    def get_helper(self, name: str) -> dict[str, Any] | None:
+        """Return helper by name."""
+
+        for helper in self.helper_crew:
+            if helper.get("name") == name:
+                return helper
+        return None
 
     def deactivate_command_mode(self) -> None:
         """Deactivate Command Mode."""

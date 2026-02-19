@@ -76,6 +76,25 @@ WhiteCell> strategy ransomware
 ```
 Uses optional Groq strategy wiring for a threat type (currently placeholder responses).
 
+
+### Crew Spawn
+```
+WhiteCell> crew spawn alpha incident analyst
+```
+Spawns a helper agent that can track incident triage activity.
+
+### Crew Report
+```
+WhiteCell> crew report
+```
+Displays helper roster plus recent helper activity.
+
+### Crew Watch
+```
+WhiteCell> crew watch 10
+```
+Starts a short live activity watch (seconds argument optional).
+
 ### Clear Crisis Mode
 ```
 WhiteCell> clear

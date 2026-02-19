@@ -51,6 +51,29 @@ class CLIGroqCommandTests(unittest.TestCase):
         self.assertEqual(self.cli.format_timestamp("not-a-date"), "not-a-date")
         self.assertEqual(self.cli.format_timestamp(""), "-")
 
+    @patch("whitecell.cli.console.print")
+    def test_crew_spawn_and_duplicate_handling(self, mock_print):
+        result = self.cli.handle_command("crew", ["spawn", "alpha", "analyst"])
+        self.assertTrue(result)
+        self.assertIsNotNone(self.cli.state.get_helper("alpha"))
+
+        duplicate_result = self.cli.handle_command("crew", ["spawn", "alpha", "analyst"])
+        self.assertTrue(duplicate_result)
+        mock_print.assert_called()
+
+    @patch("whitecell.cli.console.print")
+    def test_crew_report_no_helpers(self, mock_print):
+        self.cli.state.helper_crew.clear()
+        self.cli.state.helper_activity.clear()
+        result = self.cli.handle_command("crew", ["report"])
+        self.assertTrue(result)
+        mock_print.assert_called()
+
+    @patch("whitecell.cli.time.sleep", return_value=None)
+    def test_crew_watch_command(self, _mock_sleep):
+        result = self.cli.handle_command("crew", ["watch", "1"])
+        self.assertTrue(result)
+
 
 if __name__ == "__main__":
     unittest.main()

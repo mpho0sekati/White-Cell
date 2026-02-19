@@ -8,6 +8,9 @@ from whitecell.cli import WhiteCellCLI
 class CLIGroqCommandTests(unittest.TestCase):
     def setUp(self):
         self.cli = WhiteCellCLI()
+        self.cli.state.helper_crew.clear()
+        self.cli.state.helper_activity.clear()
+        self.cli.state.immune_history.clear()
 
     @patch("whitecell.cli.console.print")
     def test_explain_command_requires_arguments(self, mock_print):
@@ -73,6 +76,24 @@ class CLIGroqCommandTests(unittest.TestCase):
     def test_crew_watch_command(self, _mock_sleep):
         result = self.cli.handle_command("crew", ["watch", "1"])
         self.assertTrue(result)
+
+    @patch("whitecell.cli.scan_system", return_value={
+        "timestamp": "2024-01-01T10:00:00",
+        "hostname": "host-a",
+        "risk_level": "low",
+        "established_connections": 8,
+        "recommendation": "continue",
+        "findings": [],
+    })
+    @patch("whitecell.cli.console.print")
+    def test_immune_scan_and_report_commands(self, mock_print, _mock_scan):
+        scan_result = self.cli.handle_command("immune", ["scan"])
+        report_result = self.cli.handle_command("immune", ["report"])
+
+        self.assertTrue(scan_result)
+        self.assertTrue(report_result)
+        self.assertTrue(self.cli.state.immune_history)
+        mock_print.assert_called()
 
 
 if __name__ == "__main__":

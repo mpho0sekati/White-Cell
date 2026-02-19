@@ -20,11 +20,12 @@ from rich.table import Table
 from whitecell.engine import get_session_logs, handle_input, initialize_logging, parse_command
 from whitecell.groq_client import groq_client
 from whitecell.state import global_state
+from whitecell.system_guard import scan_system
 
 console = Console()
 
 GROQ_FEATURE_FLAG = "WHITECELL_ENABLE_GROQ"
-BUILTIN_COMMANDS = ("exit", "help", "status", "logs", "clear", "explain", "strategy", "crew")
+BUILTIN_COMMANDS = ("exit", "help", "status", "logs", "clear", "explain", "strategy", "crew", "immune")
 
 
 class WhiteCellCLI:
@@ -105,6 +106,8 @@ class WhiteCellCLI:
         table.add_row("crew spawn <name> [role]", "Create a helper agent for incident support")
         table.add_row("crew report", "Show helper crew status and recent activity")
         table.add_row("crew watch [seconds]", "Live watch helper activity stream")
+        table.add_row("immune scan", "Run a host-level immune scan on this system")
+        table.add_row("immune report", "Show recent immune scan summaries")
         table.add_row("exit", "Exit the application")
 
         console.print(table)
@@ -122,6 +125,7 @@ class WhiteCellCLI:
         status_table.add_row("Persisted Logs", str(self.persisted_log_count()))
         status_table.add_row("Last Threat", self.state.last_threat.get("threat_type", "None"))
         status_table.add_row("Groq", self.groq_status_text())
+        status_table.add_row("Immune Scans", str(len(self.state.immune_history)))
 
         console.print(status_table)
 
@@ -191,6 +195,34 @@ class WhiteCellCLI:
                     event.get("status", "unknown"),
                 )
             console.print(activity_table)
+
+
+    def display_immune_report(self) -> None:
+        """Display recent host immune-scan summaries."""
+
+        if not self.state.immune_history:
+            console.print("[yellow]No immune scans yet. Run: immune scan[/yellow]")
+            return
+
+        table = Table(title="Host Immune Scan History", show_header=True, header_style="bold magenta")
+        table.add_column("Time", style="cyan")
+        table.add_column("Host", style="green")
+        table.add_column("Risk", style="yellow")
+        table.add_column("Connections", style="red")
+        table.add_column("Findings", style="white")
+
+        for item in self.state.immune_history[-10:]:
+            findings = item.get("findings", [])
+            finding_summary = "; ".join(f.get("signal", "signal") for f in findings) if findings else "none"
+            table.add_row(
+                self.format_timestamp(item.get("timestamp", "")),
+                item.get("hostname", "host"),
+                item.get("risk_level", "low").upper(),
+                str(item.get("established_connections", 0)),
+                finding_summary,
+            )
+
+        console.print(table)
 
     def display_crew_watch(self, duration_seconds: int = 8) -> None:
         """Live-watch helper activity for a short duration."""
@@ -312,6 +344,50 @@ class WhiteCellCLI:
                 return True
 
             console.print("[yellow]Unknown crew command. Use spawn, report, or watch.[/yellow]")
+            return True
+
+        if command == "immune":
+            if not args:
+                console.print("[yellow]Usage: immune <scan|report>[/yellow]")
+                return True
+
+            subcommand = args[0].lower()
+            if subcommand == "scan":
+                scan_result = scan_system()
+                self.state.add_immune_scan(scan_result)
+
+                risk = scan_result.get("risk_level", "low").upper()
+                risk_color = "red" if risk == "HIGH" else "yellow" if risk == "MEDIUM" else "green"
+                console.print(
+                    Panel.fit(
+                        f"[bold]Host:[/bold] {scan_result.get('hostname')}\n"
+                        f"[bold]Risk:[/bold] [{risk_color}]{risk}[/{risk_color}]\n"
+                        f"[bold]Established Connections:[/bold] {scan_result.get('established_connections', 0)}\n"
+                        f"[bold]Recommendation:[/bold] {scan_result.get('recommendation', '')}",
+                        title="Immune Scan Result",
+                        border_style=risk_color,
+                    )
+                )
+                findings = scan_result.get("findings", [])
+                if findings:
+                    findings_table = Table(title="Immune Findings", show_header=True, header_style="bold red")
+                    findings_table.add_column("Signal", style="yellow")
+                    findings_table.add_column("Severity", style="red")
+                    findings_table.add_column("Details", style="white")
+                    for finding in findings:
+                        findings_table.add_row(
+                            finding.get("signal", "signal"),
+                            finding.get("severity", "unknown"),
+                            finding.get("details", ""),
+                        )
+                    console.print(findings_table)
+                return True
+
+            if subcommand == "report":
+                self.display_immune_report()
+                return True
+
+            console.print("[yellow]Unknown immune command. Use scan or report.[/yellow]")
             return True
 
         return None

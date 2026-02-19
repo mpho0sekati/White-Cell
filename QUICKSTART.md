@@ -95,6 +95,18 @@ WhiteCell> crew watch 10
 ```
 Starts a short live activity watch (seconds argument optional).
 
+### Immune Scan
+```
+WhiteCell> immune scan
+```
+Runs a host-level defensive scan (process/network telemetry) and returns risk + recommendations.
+
+### Immune Report
+```
+WhiteCell> immune report
+```
+Displays recent immune scan summaries for this session.
+
 ### Clear Crisis Mode
 ```
 WhiteCell> clear

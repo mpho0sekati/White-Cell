@@ -28,6 +28,7 @@ class SessionState:
     logs: list[dict[str, Any]] = field(default_factory=list)
     helper_crew: list[dict[str, Any]] = field(default_factory=list)
     helper_activity: list[dict[str, Any]] = field(default_factory=list)
+    immune_history: list[dict[str, Any]] = field(default_factory=list)
     session_active: bool = True
 
     def activate_command_mode(self, threat_info: dict[str, Any]) -> None:
@@ -82,6 +83,12 @@ class SessionState:
             if helper.get("name") == name:
                 return helper
         return None
+
+
+    def add_immune_scan(self, scan_result: dict[str, Any]) -> None:
+        """Persist a host immune-scan snapshot in session state."""
+
+        self.immune_history.append(scan_result)
 
     def deactivate_command_mode(self) -> None:
         """Deactivate Command Mode."""

@@ -188,8 +188,11 @@ $env:GROQ_API_KEY="your_api_key_here"
 
 Feature flag (enabled by default):
 ```bash
-# Disable Groq commands
+# Disable Groq commands (macOS/Linux)
 export WHITECELL_ENABLE_GROQ=0
+
+# Disable Groq commands (Windows PowerShell)
+$env:WHITECELL_ENABLE_GROQ="0"
 ```
 
 ## Troubleshooting

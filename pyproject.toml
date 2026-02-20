@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whitecell"
+version = "0.1.0"
+description = "Conversational cybersecurity CLI assistant"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+  { name = "Mpho Sekati" }
+]
+dependencies = [
+  "rich>=14.0.0",
+  "prompt-toolkit>=3.0.40",
+  "python-dotenv>=1.0.0",
+  "groq>=0.4.0"
+]
+
+[project.scripts]
+whitecell = "main:main"
+
+[tool.setuptools]
+packages = ["whitecell"]

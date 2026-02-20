@@ -48,13 +48,18 @@ class GroqClient:
     def _resolve_preferred_api_key(self) -> Optional[str]:
         """Resolve preferred key source (config first, env fallback)."""
         try:
-            from whitecell.config import get_groq_api_key
+            from whitecell.config import get_groq_api_key, validate_groq_api_key
             config_key = get_groq_api_key()
-            if config_key:
+            if config_key and validate_groq_api_key(config_key):
                 return config_key
+            if config_key:
+                logger.warning("Ignoring invalid GROQ API key from config; falling back to environment")
         except Exception as e:
             logger.debug(f"Could not read API key from config: {e}")
-        return os.getenv("GROQ_API_KEY")
+        env_key = os.getenv("GROQ_API_KEY")
+        if env_key:
+            return env_key.strip()
+        return None
 
     def _sync_api_key_from_sources(self) -> None:
         """Refresh key from config/env if changed externally."""
@@ -102,8 +107,7 @@ class GroqClient:
             True if successfully configured, False otherwise
         """
         try:
-            from whitecell.config import get_groq_api_key
-            self.api_key = get_groq_api_key()
+            self.api_key = self._resolve_preferred_api_key()
             if self.api_key:
                 os.environ["GROQ_API_KEY"] = self.api_key
             self._initialize_client()

@@ -38,3 +38,12 @@ def test_set_api_key_persists_and_updates_env(monkeypatch):
     assert persisted["value"] == api_key
     assert os.getenv("GROQ_API_KEY") == api_key
     assert client.api_key == api_key
+
+
+def test_invalid_config_key_falls_back_to_env(monkeypatch):
+    monkeypatch.setattr(gc_mod, "GROQ_AVAILABLE", False)
+    monkeypatch.setattr(cfg, "get_groq_api_key", lambda: "fernet://gAAAAABlegacy")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-env-abcdefghijklmnopqrstuvwxyz123456")
+
+    client = gc_mod.GroqClient()
+    assert client.api_key == "gsk-env-abcdefghijklmnopqrstuvwxyz123456"

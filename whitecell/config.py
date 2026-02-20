@@ -128,6 +128,10 @@ def set_groq_api_key(api_key: str) -> bool:
     Returns:
         True if successful
     """
+    api_key = (api_key or "").strip()
+    if not validate_groq_api_key(api_key):
+        return False
+
     config = load_config()
     config["groq_api_key"] = api_key
     config["groq_api_key_hash"] = hash_api_key(api_key)
@@ -222,10 +226,11 @@ def get_groq_api_status() -> dict:
             "hash": None
         }
     
+    is_valid = validate_groq_api_key(api_key)
     return {
-        "configured": config.get("groq_api_configured", False),
+        "configured": bool(config.get("groq_api_configured", False) and is_valid),
         "masked_key": mask_api_key(api_key),
-        "hash": config.get("groq_api_key_hash", hash_api_key(api_key))[:16] + "..."
+        "hash": config.get("groq_api_key_hash", hash_api_key(api_key))[:16] + "...",
     }
 
 

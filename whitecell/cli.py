@@ -46,6 +46,14 @@ COMMAND_ALIASES = {
     "q": "exit",
 }
 
+WHITECELL_LOGO = r"""
+ __        ___   _ ___ _____ _____    ____ _____ _     _
+ \ \      / / | | |_ _|_   _| ____|  / ___| ____| |   | |
+  \ \ /\ / /| |_| || |  | | |  _|   | |   |  _| | |   | |
+   \ V  V / |  _  || |  | | | |___  | |___| |___| |___| |___
+    \_/\_/  |_| |_|___| |_| |_____|  \____|_____|_____|_____|
+  [====[ SOC OPS ]====]  [====[ THREAT GRID ]====]  [===]
+"""
 
 class WhiteCellCLI:
     """Interactive command-line interface for White Cell cybersecurity assistant."""
@@ -1002,10 +1010,24 @@ class WhiteCellCLI:
 
     def start(self) -> None:
         """Start the interactive CLI session."""
-        console.print("\n[green]" + "─"*60 + "[/green]")
-        console.print("[bold green]White Cell - Cybersecurity Assistant v1.1[/bold green]")
-        console.print("[green]" + "─"*60 + "[/green]")
-        console.print("[yellow]Type 'help' for commands or ask about threats[/yellow]\n")
+        console.print()
+        console.print(
+            Panel(
+                f"[bold cyan]{WHITECELL_LOGO}[/bold cyan]",
+                title="WHITE CELL",
+                border_style="cyan",
+                expand=False,
+            )
+        )
+        console.print(
+            Panel(
+                "[bold cyan]Detection | Prevention | Intelligence | Protection[/bold cyan]\n"
+                "[dim]Type 'help' for command map or enter a threat scenario.[/dim]",
+                title="Cybersecurity Assistant",
+                border_style="cyan",
+                expand=False,
+            )
+        )
 
         try:
             while self.state.session_active:
@@ -1051,3 +1073,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

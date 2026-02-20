@@ -55,18 +55,55 @@ from whitecell.groq_client import groq_client
 from whitecell.self_improve import self_improver
 from whitecell.website_scanner import website_scanner
 from whitecell import governance
-from whitecell.logging_config import get_logger
-from whitecell.constants import (
-    COMMAND_ALIASES,
-    DEFAULT_LOG_LINES,
-    MAX_EXPORT_LINES,
-    AGENT_CHECK_INTERVAL_MIN,
-    AGENT_CHECK_INTERVAL_MAX,
-    SUCCESS_AGENT_STARTED,
-    ERROR_INVALID_INPUT,
-    WARN_NO_DATA,
-    WARN_CANCELLED,
-)
+
+try:
+    from whitecell.logging_config import get_logger
+except ImportError:
+    def get_logger(name: str):
+        return logging.getLogger(name)
+
+try:
+    from whitecell.constants import (
+        COMMAND_ALIASES,
+        DEFAULT_LOG_LINES,
+        MAX_EXPORT_LINES,
+        AGENT_CHECK_INTERVAL_MIN,
+        AGENT_CHECK_INTERVAL_MAX,
+        SUCCESS_AGENT_STARTED,
+        ERROR_INVALID_INPUT,
+        WARN_NO_DATA,
+        WARN_CANCELLED,
+    )
+except ImportError:
+    COMMAND_ALIASES = {
+        "h": "help",
+        "?": "help",
+        "st": "status",
+        "l": "logs",
+        "t": "threats",
+        "e": "export",
+        "a": "analyze",
+        "s": "search",
+        "c": "clear",
+        "q": "exit",
+        "d": "dashboard",
+        "p": "peek",
+        "tr": "triage",
+        "inv": "investigate",
+        "rsp": "respond",
+        "sf": "soc",
+        "ag": "agent",
+        "gov": "governance",
+        "lg": "logo",
+    }
+    DEFAULT_LOG_LINES = 10
+    MAX_EXPORT_LINES = 10000
+    AGENT_CHECK_INTERVAL_MIN = 5
+    AGENT_CHECK_INTERVAL_MAX = 3600
+    SUCCESS_AGENT_STARTED = "Agent started successfully."
+    ERROR_INVALID_INPUT = "Invalid input."
+    WARN_NO_DATA = "No data available."
+    WARN_CANCELLED = "Cancelled."
 
 console = Console()
 logger = get_logger(__name__)

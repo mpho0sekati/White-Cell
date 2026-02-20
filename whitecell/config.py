@@ -8,15 +8,18 @@ Author: White Cell Project
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Optional, Any
 
 from whitecell.api_security import hash_api_key, mask_api_key
 
+logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path.home() / ".whitecell"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+LEGACY_GROQ_KEY_PREFIX = "fernet://"
 
 # Default configuration
 DEFAULT_CONFIG = {
@@ -30,7 +33,7 @@ DEFAULT_CONFIG = {
         "port_monitoring",
         "process_monitoring",
         "firewall_check",
-        "system_logs"
+        "system_logs",
     ],
     "check_interval": 60,  # seconds
     "max_threats": 10,
@@ -51,7 +54,7 @@ DEFAULT_CONFIG = {
         "window_seconds": 60,
         "per_agent": {},
         "use_model_scoring": False,
-        "model_confidence_threshold": 80
+        "model_confidence_threshold": 80,
     },
 }
 
@@ -65,37 +68,37 @@ def ensure_config_dir() -> Path:
 def load_config() -> dict:
     """
     Load configuration from file.
-    
+
     Returns:
         Configuration dictionary
     """
     ensure_config_dir()
-    
+
     if CONFIG_FILE.exists():
         try:
-            with open(CONFIG_FILE, 'r') as f:
+            with open(CONFIG_FILE, "r") as f:
                 config = json.load(f)
                 # Merge with defaults to ensure all keys exist
                 return {**DEFAULT_CONFIG, **config}
         except (json.JSONDecodeError, IOError):
             return DEFAULT_CONFIG.copy()
-    
+
     return DEFAULT_CONFIG.copy()
 
 
 def save_config(config: dict) -> bool:
     """
     Save configuration to file.
-    
+
     Args:
         config: Configuration dictionary to save
-        
+
     Returns:
         True if successful, False otherwise
     """
     try:
         ensure_config_dir()
-        with open(CONFIG_FILE, 'w') as f:
+        with open(CONFIG_FILE, "w") as f:
             json.dump(config, f, indent=2)
         # Set file permissions to readable only by owner
         os.chmod(CONFIG_FILE, 0o600)
@@ -108,7 +111,7 @@ def save_config(config: dict) -> bool:
 def get_groq_api_key() -> Optional[str]:
     """
     Get GROQ API key from configuration.
-    
+
     Returns:
         API key or None if not configured
     """
@@ -116,15 +119,66 @@ def get_groq_api_key() -> Optional[str]:
     return config.get("groq_api_key")
 
 
+def is_legacy_encrypted_groq_key(api_key: Optional[str]) -> bool:
+    """
+    Return True when the key is in a deprecated encrypted-on-disk format.
+    """
+    return bool(api_key and str(api_key).strip().startswith(LEGACY_GROQ_KEY_PREFIX))
+
+
+def _clear_groq_api_key(config: dict) -> dict:
+    """
+    Clear Groq key fields in config dict.
+    """
+    config["groq_api_key"] = None
+    config["groq_api_key_hash"] = None
+    config["groq_api_configured"] = False
+    return config
+
+
+def migrate_legacy_groq_api_key(fallback_api_key: Optional[str] = None) -> Optional[str]:
+    """
+    Migrate deprecated legacy Groq key format (`fernet://...`).
+
+    Since current versions do not support decrypting this format, migration uses
+    a valid fallback key (typically from `GROQ_API_KEY`) when available.
+    If no valid fallback key exists, the legacy key is removed.
+    """
+    config = load_config()
+    stored_key = config.get("groq_api_key")
+    if not is_legacy_encrypted_groq_key(stored_key):
+        return stored_key if validate_groq_api_key(stored_key or "") else None
+
+    candidate = (fallback_api_key or "").strip()
+    if validate_groq_api_key(candidate):
+        logger.warning(
+            "Legacy encrypted Groq API key detected (fernet://...). "
+            "Migrating to current supported format using environment key."
+        )
+        config["groq_api_key"] = candidate
+        config["groq_api_key_hash"] = hash_api_key(candidate)
+        config["groq_api_configured"] = True
+        save_config(config)
+        return candidate
+
+    logger.warning(
+        "Legacy encrypted Groq API key detected (fernet://...) and cannot be decrypted. "
+        "Clearing stored key. Run 'agent configure' to set a new key."
+    )
+    _clear_groq_api_key(config)
+    save_config(config)
+    return None
+
+
 def set_groq_api_key(api_key: str) -> bool:
     """
     Set GROQ API key in configuration.
-    
+
     Also stores a hash of the key for verification and displays masked version.
-    
+
     Args:
         api_key: The API key to set
-        
+
     Returns:
         True if successful
     """
@@ -150,10 +204,10 @@ def is_agent_enabled() -> bool:
 def set_agent_enabled(enabled: bool) -> bool:
     """
     Enable or disable the agent.
-    
+
     Args:
         enabled: Whether to enable the agent
-        
+
     Returns:
         True if successful
     """
@@ -165,11 +219,11 @@ def set_agent_enabled(enabled: bool) -> bool:
 def get_config_value(key: str, default: Any = None) -> Any:
     """
     Get a configuration value.
-    
+
     Args:
         key: Configuration key
         default: Default value if not found
-        
+
     Returns:
         Configuration value or default
     """
@@ -180,11 +234,11 @@ def get_config_value(key: str, default: Any = None) -> Any:
 def set_config_value(key: str, value: Any) -> bool:
     """
     Set a configuration value.
-    
+
     Args:
         key: Configuration key
         value: Value to set
-        
+
     Returns:
         True if successful
     """
@@ -196,7 +250,7 @@ def set_config_value(key: str, value: Any) -> bool:
 def get_all_config() -> dict:
     """
     Get all configuration values (excluding API key for security).
-    
+
     Returns:
         Configuration dictionary with masked API key
     """
@@ -212,20 +266,16 @@ def get_all_config() -> dict:
 def get_groq_api_status() -> dict:
     """
     Get GROQ API key status (configured flag, masked key, hash).
-    
+
     Returns:
         Dictionary with 'configured', 'masked_key', and 'hash' fields
     """
     config = load_config()
     api_key = config.get("groq_api_key")
-    
+
     if not api_key:
-        return {
-            "configured": False,
-            "masked_key": None,
-            "hash": None
-        }
-    
+        return {"configured": False, "masked_key": None, "hash": None}
+
     is_valid = validate_groq_api_key(api_key)
     return {
         "configured": bool(config.get("groq_api_configured", False) and is_valid),
@@ -237,14 +287,15 @@ def get_groq_api_status() -> dict:
 def validate_groq_api_key(api_key: str) -> bool:
     """
     Validate GROQ API key format (basic validation).
-    
+
     Args:
         api_key: API key to validate
-        
+
     Returns:
         True if format is valid
     """
     from whitecell.api_security import verify_api_key_format
+
     return verify_api_key_format(api_key, "groq")
 
 

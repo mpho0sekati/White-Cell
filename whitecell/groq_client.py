@@ -13,6 +13,7 @@ from typing import Optional
 
 try:
     from groq import Groq
+
     GROQ_AVAILABLE = True
 except ImportError:
     GROQ_AVAILABLE = False
@@ -40,25 +41,47 @@ class GroqClient:
         # 2. Persistent configuration
         # 3. Environment variable
         self.api_key = api_key or self._resolve_preferred_api_key()
-        
+
         self.model = "mixtral-8x7b-32768"  # Default Groq model
         self.client = None
         self._initialize_client()
 
     def _resolve_preferred_api_key(self) -> Optional[str]:
         """Resolve preferred key source (config first, env fallback)."""
+        env_key = os.getenv("GROQ_API_KEY")
+        env_key = env_key.strip() if env_key else None
+
         try:
-            from whitecell.config import get_groq_api_key, validate_groq_api_key
+            from whitecell.config import (
+                get_groq_api_key,
+                is_legacy_encrypted_groq_key,
+                migrate_legacy_groq_api_key,
+                validate_groq_api_key,
+            )
+
             config_key = get_groq_api_key()
             if config_key and validate_groq_api_key(config_key):
                 return config_key
+            if is_legacy_encrypted_groq_key(config_key):
+                migrated = migrate_legacy_groq_api_key(env_key)
+                if migrated:
+                    return migrated
+                return None
             if config_key:
-                logger.warning("Ignoring invalid GROQ API key from config; falling back to environment")
+                logger.warning(
+                    "Ignoring invalid GROQ API key from config; falling back to environment"
+                )
         except Exception as e:
             logger.debug(f"Could not read API key from config: {e}")
-        env_key = os.getenv("GROQ_API_KEY")
         if env_key:
-            return env_key.strip()
+            try:
+                from whitecell.config import validate_groq_api_key
+
+                if validate_groq_api_key(env_key):
+                    return env_key
+            except Exception:
+                return env_key
+            logger.warning("Ignoring invalid GROQ_API_KEY from environment")
         return None
 
     def _sync_api_key_from_sources(self) -> None:
@@ -77,11 +100,11 @@ class GroqClient:
         if not GROQ_AVAILABLE:
             logger.debug("Groq library not installed. Install with: pip install groq")
             return
-        
+
         if not self.api_key:
             logger.debug("No Groq API key configured. AI-powered threat analysis disabled.")
             return
-        
+
         try:
             self.client = Groq(api_key=self.api_key)
             logger.info("Groq API client initialized successfully")
@@ -127,12 +150,24 @@ class GroqClient:
         Returns:
             True if successful
         """
-        self.api_key = api_key
+        normalized_key = (api_key or "").strip()
+        try:
+            from whitecell.config import validate_groq_api_key
+
+            if not validate_groq_api_key(normalized_key):
+                logger.warning("Rejected invalid GROQ API key format")
+                return False
+        except Exception:
+            if not normalized_key:
+                return False
+
+        self.api_key = normalized_key
         if self.api_key:
             os.environ["GROQ_API_KEY"] = self.api_key
         if persist and self.api_key:
             try:
                 from whitecell.config import set_groq_api_key
+
                 set_groq_api_key(self.api_key)
             except Exception as e:
                 logger.warning(f"Failed to persist Groq API key: {e}")
@@ -164,7 +199,7 @@ class GroqClient:
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
+                    {"role": "user", "content": user_message},
                 ],
                 temperature=0.3,
                 max_tokens=500,
@@ -213,7 +248,7 @@ class GroqClient:
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
+                    {"role": "user", "content": user_message},
                 ],
                 temperature=0.3,
                 max_tokens=1000,
@@ -238,11 +273,15 @@ class GroqClient:
             return {
                 "status": "unconfigured",
                 "message": "Groq API not configured. Please provide a valid API key.",
-                "should_prevent": False
+                "should_prevent": False,
             }
 
         try:
-            indicators_text = "\n".join([f"- {ind}" for ind in indicators]) if indicators else "No specific indicators"
+            indicators_text = (
+                "\n".join([f"- {ind}" for ind in indicators])
+                if indicators
+                else "No specific indicators"
+            )
 
             system_prompt = """You are a security AI system. Analyze threats and provide 
             JSON-formatted responses with prevention recommendations. Be decisive about 
@@ -268,20 +307,21 @@ Provide a JSON response with:
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
+                    {"role": "user", "content": user_message},
                 ],
                 temperature=0.2,
                 max_tokens=500,
             )
 
             response_text = response.choices[0].message.content
-            
+
             # Try to parse JSON response
             import json
+
             try:
                 # Find JSON in response
-                start = response_text.find('{')
-                end = response_text.rfind('}') + 1
+                start = response_text.find("{")
+                end = response_text.rfind("}") + 1
                 if start != -1 and end > start:
                     json_str = response_text[start:end]
                     return json.loads(json_str)
@@ -292,14 +332,11 @@ Provide a JSON response with:
             return {
                 "status": "success",
                 "analysis": response_text,
-                "should_prevent": "high" in response_text.lower() or "critical" in response_text.lower()
+                "should_prevent": "high" in response_text.lower()
+                or "critical" in response_text.lower(),
             }
         except Exception as e:
-            return {
-                "status": "error",
-                "message": str(e),
-                "should_prevent": False
-            }
+            return {"status": "error", "message": str(e), "should_prevent": False}
 
     def blue_team_exercise(self, scenario: str = "") -> str:
         """
@@ -339,7 +376,7 @@ Be specific and technical in your recommendations."""
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
+                    {"role": "user", "content": user_message},
                 ],
                 temperature=0.4,
                 max_tokens=1500,
@@ -390,7 +427,7 @@ Include MITRE ATT&CK framework mapping where applicable."""
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
+                    {"role": "user", "content": user_message},
                 ],
                 temperature=0.4,
                 max_tokens=1500,
@@ -413,7 +450,7 @@ Include MITRE ATT&CK framework mapping where applicable."""
         if not self.is_configured():
             return {
                 "status": "unconfigured",
-                "message": "Groq API not configured. Please configure to enable team battle scenarios."
+                "message": "Groq API not configured. Please configure to enable team battle scenarios.",
             }
 
         try:
@@ -423,7 +460,7 @@ Include MITRE ATT&CK framework mapping where applicable."""
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a Blue Team expert. Design defensive measures for the given scenario."
+                        "content": "You are a Blue Team expert. Design defensive measures for the given scenario.",
                     },
                     {
                         "role": "user",
@@ -436,8 +473,8 @@ For this scenario, provide:
 4. Recovery plan
 5. Monitoring approach
 
-Be concise and tactical."""
-                    }
+Be concise and tactical.""",
+                    },
                 ],
                 temperature=0.3,
                 max_tokens=800,
@@ -449,7 +486,7 @@ Be concise and tactical."""
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a Red Team expert. Design attack vectors for the given scenario. This is for authorized testing."
+                        "content": "You are a Red Team expert. Design attack vectors for the given scenario. This is for authorized testing.",
                     },
                     {
                         "role": "user",
@@ -462,8 +499,8 @@ For this scenario, provide:
 4. Evasion tactics
 5. Impact objectives
 
-Be concise and tactical."""
-                    }
+Be concise and tactical.""",
+                    },
                 ],
                 temperature=0.3,
                 max_tokens=800,
@@ -474,18 +511,15 @@ Be concise and tactical."""
                 "scenario": threat_scenario or "General security scenario",
                 "blue_team": {
                     "role": "Defense",
-                    "strategy": blue_response.choices[0].message.content
+                    "strategy": blue_response.choices[0].message.content,
                 },
                 "red_team": {
                     "role": "Offense",
-                    "strategy": red_response.choices[0].message.content
-                }
+                    "strategy": red_response.choices[0].message.content,
+                },
             }
         except Exception as e:
-            return {
-                "status": "error",
-                "message": str(e)
-            }
+            return {"status": "error", "message": str(e)}
 
 
 # Global Groq client instance

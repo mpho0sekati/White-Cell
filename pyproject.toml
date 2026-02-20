@@ -12,6 +12,20 @@ license = { text = "MIT" }
 authors = [
   { name = "Mpho Sekati" }
 ]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Information Technology",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Security",
+  "Topic :: System :: Monitoring",
+]
 dependencies = [
   "rich>=14.0.0",
   "prompt-toolkit>=3.0.40",
@@ -19,8 +33,47 @@ dependencies = [
   "groq>=0.4.0"
 ]
 
+[project.urls]
+Homepage = "https://github.com/mpho0sekati/White-Cell"
+Repository = "https://github.com/mpho0sekati/White-Cell"
+Issues = "https://github.com/mpho0sekati/White-Cell/issues"
+Changelog = "https://github.com/mpho0sekati/White-Cell/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.6.0",
+  "black>=24.0.0",
+  "mypy>=1.10.0",
+  "build>=1.2.0",
+]
+crewai = [
+  "crewai>=0.102.0",
+]
+
 [project.scripts]
 whitecell = "main:main"
 
 [tool.setuptools]
 packages = ["whitecell"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+warn_return_any = false
+warn_unused_configs = true
+check_untyped_defs = false

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[dev]
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: Black
+        run: |
+          black --check main.py
+          black --check whitecell/config.py
+          black --check whitecell/groq_client.py
+          black --check tests/test_groq_client_persistence.py
+          black --check tests/test_config_groq_migration.py
+          black --check tests/test_cli_enhanced_integration.py
+
+      - name: Pytest
+        run: pytest -q
+
+      - name: Build
+        run: python -m build
+
+      - name: Mypy (Optional)
+        continue-on-error: true
+        run: mypy whitecell

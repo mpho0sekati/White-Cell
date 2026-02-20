@@ -11,13 +11,15 @@ Usage:
 from whitecell.cli_enhanced import EnhancedWhiteCellCLI
 from whitecell.groq_client import groq_client
 
+
 def main():
     """Start the enhanced CLI."""
     # Ensure Groq client loads any stored API key from config
     groq_client.reload_from_config()
-    
+
     cli = EnhancedWhiteCellCLI()
     cli.start()
+
 
 if __name__ == "__main__":
     main()

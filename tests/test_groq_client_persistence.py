@@ -34,7 +34,9 @@ def test_set_api_key_persists_and_updates_env(monkeypatch):
 
     client = gc_mod.GroqClient()
     api_key = "gsk-persist-abcdefghijklmnopqrstuvwxyz123456"
-    assert client.set_api_key(api_key, persist=True) is False  # SDK unavailable, but key handling should still work
+    assert (
+        client.set_api_key(api_key, persist=True) is False
+    )  # SDK unavailable, but key handling should still work
     assert persisted["value"] == api_key
     assert os.getenv("GROQ_API_KEY") == api_key
     assert client.api_key == api_key
@@ -43,7 +45,19 @@ def test_set_api_key_persists_and_updates_env(monkeypatch):
 def test_invalid_config_key_falls_back_to_env(monkeypatch):
     monkeypatch.setattr(gc_mod, "GROQ_AVAILABLE", False)
     monkeypatch.setattr(cfg, "get_groq_api_key", lambda: "fernet://gAAAAABlegacy")
+    monkeypatch.setattr(cfg, "is_legacy_encrypted_groq_key", lambda _: False)
     monkeypatch.setenv("GROQ_API_KEY", "gsk-env-abcdefghijklmnopqrstuvwxyz123456")
 
     client = gc_mod.GroqClient()
     assert client.api_key == "gsk-env-abcdefghijklmnopqrstuvwxyz123456"
+
+
+def test_set_api_key_rejects_invalid_format(monkeypatch):
+    monkeypatch.setattr(gc_mod, "GROQ_AVAILABLE", False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setattr(cfg, "get_groq_api_key", lambda: None)
+
+    client = gc_mod.GroqClient()
+    assert client.set_api_key("not-a-groq-key", persist=False) is False
+    assert client.api_key is None
+    assert os.getenv("GROQ_API_KEY") is None

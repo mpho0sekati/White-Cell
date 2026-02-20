@@ -18,7 +18,7 @@ from whitecell.config import get_guardian_config
 from whitecell.groq_client import groq_client
 
 # Module-level guardian instance
-guardian_instance: GuardianAgent | None = None
+guardian_instance: "GuardianAgent | None" = None
 
 
 class GuardianAgent:

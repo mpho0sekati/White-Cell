@@ -15,6 +15,7 @@ Author: White Cell Project
 import json
 import csv
 import time
+import logging
 from pathlib import Path
 from datetime import datetime
 from collections import Counter
@@ -54,8 +55,21 @@ from whitecell.groq_client import groq_client
 from whitecell.self_improve import self_improver
 from whitecell.website_scanner import website_scanner
 from whitecell import governance
+from whitecell.logging_config import get_logger
+from whitecell.constants import (
+    COMMAND_ALIASES,
+    DEFAULT_LOG_LINES,
+    MAX_EXPORT_LINES,
+    AGENT_CHECK_INTERVAL_MIN,
+    AGENT_CHECK_INTERVAL_MAX,
+    SUCCESS_AGENT_STARTED,
+    ERROR_INVALID_INPUT,
+    WARN_NO_DATA,
+    WARN_CANCELLED,
+)
 
 console = Console()
+logger = get_logger(__name__)
 
 WHITECELL_LOGO = r"""
  __        ___     _ _         ____     _ _
@@ -64,29 +78,6 @@ WHITECELL_LOGO = r"""
    \ V  V / | | | | | ||  __/| |__|  __/ | |
     \_/\_/  |_| |_|_|\__\___| \____\___|_|_|
 """
-
-# Command aliases for faster navigation
-COMMAND_ALIASES = {
-    "h": "help",
-    "?": "help",
-    "st": "status",
-    "l": "logs",
-    "t": "threats",
-    "e": "export",
-    "a": "analyze",
-    "s": "search",
-    "c": "clear",
-    "q": "exit",
-    "ag": "agent",
-    "d": "dashboard",
-    "p": "peek",
-    "lg": "logo",
-    "tr": "triage",
-    "inv": "investigate",
-    "rsp": "respond",
-    "gov": "governance",
-    "sf": "soc",
-}
 
 # Quick command suggestions based on context
 CONTEXT_SUGGESTIONS = {
@@ -100,7 +91,7 @@ CONTEXT_SUGGESTIONS = {
 class EnhancedWhiteCellCLI:
     """Enhanced interactive CLI with improved UX and visual design."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the enhanced CLI."""
         self.state = global_state
         self.session_threats = []
@@ -691,7 +682,9 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
             if not Confirm.ask("Update it?"):
                 return
         
-        api_key = Prompt.ask("[cyan]Enter your GROQ API key[/cyan]", password=True)
+        api_key = Prompt.ask("[cyan]Enter your GROQ API key[/cyan]", password=True).strip()
+        if api_key and api_key.lower() != 'cancel':
+            console.print(f"[dim]Input received ({len(api_key)} characters).[/dim]")
         
         if not api_key or api_key.lower() == 'cancel':
             console.print("[yellow]Cancelled[/yellow]")
@@ -743,46 +736,66 @@ Active Agents:      {agent_stats['running_agents']}/{agent_stats['total_agents']
         
         try:
             while self.state.session_active:
-                # Show menu hint once to keep the view clean
-                if not self._menu_hint_shown:
-                    console.print("[dim]Type [cyan]?[/cyan] for menu or [cyan]help[/cyan] for commands[/dim]")
-                    self._menu_hint_shown = True
+                try:
+                    # Show menu hint once to keep the view clean
+                    if not self._menu_hint_shown:
+                        console.print("[dim]Type [cyan]?[/cyan] for menu or [cyan]help[/cyan] for commands[/dim]")
+                        self._menu_hint_shown = True
+                    
+                    user_input = console.input(self.get_prompt())
+                    
+                    if not user_input.strip():
+                        continue
+                    
+                    # Add to history
+                    self.command_history.append(user_input)
+                    
+                    # Check for menu
+                    if user_input.lower() in ['?', 'menu']:
+                        choice = self.display_quick_menu()
+                        if choice and choice != "0":
+                            self.handle_menu_selection(choice)
+                        continue
+                    
+                    # Parse command
+                    command, args = parse_command(user_input)
+                    command = self.expand_alias(command)
+                    
+                    # Handle built-in commands
+                    if command in [
+                        "exit", "help", "logo", "threats", "status", "logs", "search", "analyze",
+                        "export", "clear", "agent", "dashboard", "peek", "scan",
+                        "triage", "investigate", "respond", "governance", "soc",
+                    ]:
+                        result = self.handle_command(command, args)
+                        if result is False:
+                            break
+                        continue
+                    
+                    # Process as threat input
+                    self.process_threat_input(user_input)
                 
-                user_input = console.input(self.get_prompt())
-                
-                if not user_input.strip():
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Invalid input or parameter: {e}")
+                    console.print(f"[red]Error:[/red] Invalid input - {e}")
                     continue
-                
-                # Add to history
-                self.command_history.append(user_input)
-                
-                # Check for menu
-                if user_input.lower() in ['?', 'menu']:
-                    choice = self.display_quick_menu()
-                    if choice and choice != "0":
-                        self.handle_menu_selection(choice)
+                except KeyError as e:
+                    logger.error(f"Configuration error: {e}")
+                    console.print(f"[red]Configuration error:[/red] Missing setting {e}")
                     continue
-                
-                # Parse command
-                command, args = parse_command(user_input)
-                command = self.expand_alias(command)
-                
-                # Handle built-in commands
-                if command in [
-                    "exit", "help", "logo", "threats", "status", "logs", "search", "analyze",
-                    "export", "clear", "agent", "dashboard", "peek", "scan",
-                    "triage", "investigate", "respond", "governance", "soc",
-                ]:
-                    result = self.handle_command(command, args)
-                    if result is False:
-                        break
+                except Exception as e:
+                    logger.error(f"Unexpected error in CLI loop: {e}", exc_info=True)
+                    console.print(f"[red]Error:[/red] {e}")
+                    console.print("[yellow]Continuing... Type 'help' for commands[/yellow]")
                     continue
-                
-                # Process as threat input
-                self.process_threat_input(user_input)
         
         except (KeyboardInterrupt, EOFError):
             console.print("\n[bold green]Exiting White Cell. Stay secure![/bold green]")
+            self.state.session_active = False
+        except Exception as e:
+            logger.critical(f"Critical error in CLI: {e}", exc_info=True)
+            console.print(f"\n[bold red]Critical error:[/bold red] {e}")
+            console.print("[yellow]Exiting....[/yellow]")
             self.state.session_active = False
 
     def handle_command(self, command: str, args: list) -> bool:

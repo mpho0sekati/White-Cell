@@ -336,6 +336,8 @@ class WhiteCellCLI:
         console.print("[yellow]Get your API key from: https://console.groq.com/keys[/yellow]\n")
         
         api_key = input("Enter your Groq API key: ").strip()
+        if api_key:
+            console.print(f"[dim]Input received ({len(api_key)} characters).[/dim]")
         
         if not api_key:
             console.print("[red]API key cannot be empty.[/red]")

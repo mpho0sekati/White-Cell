@@ -1,0 +1,4 @@
+timestamp,threat_type,keywords_matched,user_input,risk_score,risk_level,estimated_financial_loss,popia_exposure
+2026-02-18T13:57:15.735214,malware,malware,We detected a malware infection on 3 servers,88,high,5280,True
+2026-02-18T13:57:15.758780,data_breach,breach,Possible data breach - unauthorized access detected,92,high,18400,True
+2026-02-18T14:47:39.726644,ransomware,ransomware,We detected ransomware on 3 servers,100,high,10000,True

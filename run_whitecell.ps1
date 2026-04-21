@@ -49,7 +49,7 @@ $result = python -c "import rich; print('Rich library version: ' + rich.__versio
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Rich library not found or not properly installed." -ForegroundColor Yellow
     Write-Host "Installing rich library separately..." -ForegroundColor Yellow
-    pip install rich>=14.0.0
+    pip install rich>=15.0.0
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Error: Failed to install rich library." -ForegroundColor Red
         Pause

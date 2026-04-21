@@ -77,6 +77,24 @@ class WhiteCellCLI:
         """
         return COMMAND_ALIASES.get(command, command)
 
+    def _status_line(self, level: str, message: str) -> str:
+        """Build a consistent inline status string."""
+        color_map = {
+            "ok": "green",
+            "warn": "yellow",
+            "error": "red",
+            "info": "cyan",
+        }
+        label_map = {
+            "ok": "[OK]",
+            "warn": "[WARN]",
+            "error": "[ERROR]",
+            "info": "[INFO]",
+        }
+        color = color_map.get(level, "white")
+        label = label_map.get(level, "[INFO]")
+        return f"[{color}]{label}[/{color}] {message}"
+
     def get_prompt(self) -> str:
         """
         Get the current prompt based on system state.
@@ -94,9 +112,9 @@ class WhiteCellCLI:
     def display_help(self) -> None:
         """Display comprehensive help information and available commands."""
         help_text = """
-[bold green]═══════════════════════════════════════════════════════════════[/bold green]
+[bold green]===============================================================[/bold green]
 [bold yellow]White Cell - Cybersecurity Assistant v1.1[/bold yellow]
-[bold green]═══════════════════════════════════════════════════════════════[/bold green]
+[bold green]===============================================================[/bold green]
 
 [bold cyan]Core Commands:[/bold cyan]
   [yellow]help[/yellow] (h, ?)          - Show this help message
@@ -117,30 +135,30 @@ class WhiteCellCLI:
 
 [bold cyan]Usage Examples:[/bold cyan]
   Simply type a security scenario or question:
-  • "We detected ransomware on 3 servers"
-  • "Possible DDoS attack - packet flood detected"
-  • "Multiple failed login attempts"
+  - "We detected ransomware on 3 servers"
+  - "Possible DDoS attack - packet flood detected"
+  - "Multiple failed login attempts"
   
   The system will:
-  • Detect potential threats using keyword analysis
-  • Calculate risk scores (0-100)
-  • Provide recommended actions
-  • Log all detected threats
+  - Detect potential threats using keyword analysis
+  - Calculate risk scores (0-100)
+  - Provide recommended actions
+  - Log all detected threats
 
 [bold cyan]Command Mode:[/bold cyan]
   When a threat is detected:
-  • The system enters CRISIS MODE (shown in red)
-  • A risk assessment is displayed
-  • Suggested actions are provided
-  • Use 'clear' to exit Command Mode
+  - The system enters CRISIS MODE (shown in red)
+  - A risk assessment is displayed
+  - Suggested actions are provided
+  - Use 'clear' to exit Command Mode
 
 [bold cyan]Tips:[/bold cyan]
-  • Use aliases: 'h' for 'help', 'l' for 'logs'
-  • Type 'threats' to see all threat types
-  • Use 'search ransomware' to find specific threats
-  • Export logs as CSV: 'export csv'
+  - Use aliases: 'h' for 'help', 'l' for 'logs'
+  - Type 'threats' to see all threat types
+  - Use 'search ransomware' to find specific threats
+  - Export logs as CSV: 'export csv'
 
-[bold green]═══════════════════════════════════════════════════════════════[/bold green]
+[bold green]===============================================================[/bold green]
 """
         console.print(help_text)
 
@@ -375,9 +393,9 @@ class WhiteCellCLI:
         # Display API configuration status
         api_status = get_groq_api_status()
         if api_status['configured']:
-            console.print(f"[green]✓ Groq API Configured[/green]: {api_status['masked_key']} | Hash: {api_status['hash']}")
+            console.print(self._status_line("ok", f"Groq API Configured: {api_status['masked_key']} | Hash: {api_status['hash']}"))
         else:
-            console.print("[yellow]! Groq API Not Configured[/yellow]")
+            console.print(self._status_line("warn", "Groq API Not Configured"))
         console.print()
         
         if not status:
@@ -1073,4 +1091,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

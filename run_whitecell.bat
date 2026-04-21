@@ -47,7 +47,7 @@ python -c "import rich; print('Rich library version: ' + rich.__version__)"
 if errorlevel 1 (
     echo Error: Rich library not found or not properly installed.
     echo Installing rich library separately...
-    pip install rich>=14.0.0
+    pip install rich>=15.0.0
     if errorlevel 1 (
         echo Error: Failed to install rich library.
         pause

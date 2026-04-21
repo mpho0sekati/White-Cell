@@ -29,22 +29,22 @@ from whitecell.crew import crew_manager
 from whitecell.website_scanner import website_scanner
 from whitecell.config import load_config, set_groq_api_key, get_groq_api_key, validate_groq_api_key, set_config_value, get_guardian_config, get_groq_api_status
 from whitecell.guardian import start_guardian_from_config, stop_guardian, get_guardian_status, create_and_start_guardian
+from whitecell.constants import (
+    COMMAND_ALIASES,
+    DEFAULT_LOG_LINES,
+    MAX_EXPORT_LINES,
+    AGENT_CHECK_INTERVAL_MIN,
+    AGENT_CHECK_INTERVAL_MAX,
+    SUCCESS_AGENT_STARTED,
+    ERROR_INVALID_INPUT,
+    WARN_NO_DATA,
+    WARN_CANCELLED,
+)
 
 console = Console()
 
 # Command aliases for faster navigation
-COMMAND_ALIASES = {
-    "h": "help",
-    "?": "help",
-    "st": "status",
-    "l": "logs",
-    "t": "threats",
-    "e": "export",
-    "a": "analyze",
-    "s": "search",
-    "c": "clear",
-    "q": "exit",
-}
+# Now imported from constants.py for consistency with cli_enhanced.py
 
 WHITECELL_LOGO = r"""
  __        ___   _ ___ _____ _____    ____ _____ _     _

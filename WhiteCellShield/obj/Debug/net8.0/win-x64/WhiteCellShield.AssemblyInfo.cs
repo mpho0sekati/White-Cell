@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("WhiteCellShield")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4e226a02f50972cbcecf386d94936597101d04aa")]
 [assembly: System.Reflection.AssemblyProductAttribute("WhiteCellShield")]
 [assembly: System.Reflection.AssemblyTitleAttribute("WhiteCellShield")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

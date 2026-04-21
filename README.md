@@ -42,6 +42,12 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+Developer tooling:
+
+```bash
+pip install -e .[dev]
+```
+
 ## Run
 
 ```bash
@@ -100,6 +106,8 @@ agent crewai <objective>
 
 - `QUICKSTART.md` - fast setup and day-1 usage
 - `README_AGENT_SYSTEM.md` - operations and governance detail
+- `RUN_INSTRUCTIONS.md` - Windows-first launch instructions
+- `docs/CONTRIBUTING_GITHUB.md` - GitHub contribution troubleshooting
 - `docs/updates.md` - dated project updates
 
 ## Test Status
@@ -108,4 +116,10 @@ Run all tests:
 
 ```bash
 venv\Scripts\python -m pytest -q tests
+```
+
+If `pytest` is missing in your virtual environment, install dev dependencies first:
+
+```bash
+pip install -e .[dev]
 ```

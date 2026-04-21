@@ -3,10 +3,17 @@
 ## 1. Setup
 
 ```bash
-cd /path/to/whitecell_project
+git clone https://github.com/mpho0sekati/White-Cell.git
+cd White-Cell
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+Optional developer setup:
+
+```bash
+pip install -e .[dev]
 ```
 
 ## 2. Run
@@ -132,3 +139,18 @@ pip install -r requirements.txt
 ```bash
 venv\Scripts\python -m pytest -q tests
 ```
+
+If `pytest` is not installed, run:
+
+```bash
+pip install -e .[dev]
+```
+
+### GitHub contributions not showing
+
+If a pushed commit does not appear on your GitHub contribution graph:
+
+- Make sure the commit email matches an email added to your GitHub account
+- Make sure that email is verified on GitHub
+- Make sure the commit was pushed to the repository default branch or a merged pull request
+- Allow a few minutes for GitHub to refresh contribution data

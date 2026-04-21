@@ -1,5 +1,25 @@
 # Project Updates
 
+## 2026-04-21
+
+### CLI and Maintainer Workflow
+
+- Removed duplicated `EnhancedWhiteCellCLI` definitions from `whitecell/cli_enhanced.py`
+- Standardized CLI status messaging across the main and enhanced CLI entry points
+- Centralized governed response action definitions in the enhanced CLI
+- Normalized terminal output to ASCII-safe text for better Windows console compatibility
+
+### Dependency and Runbook Alignment
+
+- Aligned project metadata and launcher scripts on `rich>=15.0.0`
+- Removed accidental dependency-output artifact from the repository root
+
+### Documentation Refresh
+
+- Updated `README.md` with developer setup guidance
+- Updated `QUICKSTART.md` with Git clone flow, dev dependency setup, and contribution troubleshooting
+- Added `docs/CONTRIBUTING_GITHUB.md` for contribution graph troubleshooting
+
 ## 2026-02-19
 
 ### Platform and Workflow
@@ -32,4 +52,3 @@
 - Rewrote `README.md` with SOC-first and governance-first framing
 - Rewrote `QUICKSTART.md` with production command paths only
 - Rewrote `README_AGENT_SYSTEM.md` as operations guide
-

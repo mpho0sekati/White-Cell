@@ -12,6 +12,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Optional, Any
+from urllib.parse import urlparse
 
 from whitecell.api_security import hash_api_key, mask_api_key
 
@@ -40,7 +41,7 @@ DEFAULT_CONFIG = {
     "threat_threshold": 50,  # risk score
     "scan_allowlist": [],  # domains authorized for active website probing
     "governance": {
-        "role": "admin",
+        "role": "analyst",
         "approval_required_actions": [
             "scan.website.active",
             "respond.block_ip",
@@ -62,7 +63,19 @@ DEFAULT_CONFIG = {
 def ensure_config_dir() -> Path:
     """Ensure config directory exists."""
     CONFIG_DIR.mkdir(exist_ok=True, parents=True)
+    try:
+        os.chmod(CONFIG_DIR, 0o700)
+    except OSError:
+        logger.debug("Could not tighten config directory permissions", exc_info=True)
     return CONFIG_DIR
+
+
+def _secure_path(path: Path) -> None:
+    """Best-effort owner-only permissions for sensitive files."""
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        logger.debug("Could not tighten permissions for %s", path, exc_info=True)
 
 
 def load_config() -> dict:
@@ -76,7 +89,7 @@ def load_config() -> dict:
 
     if CONFIG_FILE.exists():
         try:
-            with open(CONFIG_FILE, "r") as f:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
                 # Merge with defaults to ensure all keys exist
                 return {**DEFAULT_CONFIG, **config}
@@ -98,14 +111,29 @@ def save_config(config: dict) -> bool:
     """
     try:
         ensure_config_dir()
-        with open(CONFIG_FILE, "w") as f:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
-        # Set file permissions to readable only by owner
-        os.chmod(CONFIG_FILE, 0o600)
+        _secure_path(CONFIG_FILE)
         return True
     except IOError as e:
         print(f"Failed to save config: {e}")
         return False
+
+
+def normalize_allowlist_domain(value: str) -> Optional[str]:
+    """
+    Normalize and validate a single allowlist domain.
+    Returns the hostname in lowercase or None when invalid.
+    """
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    host = (parsed.hostname or raw).strip(".")
+    if not host or "*" in host or "/" in host or " " in host:
+        return None
+    return host
 
 
 def get_groq_api_key() -> Optional[str]:
@@ -313,7 +341,10 @@ def get_scan_allowlist() -> list[str]:
     """
     config = load_config()
     allowlist = config.get("scan_allowlist", DEFAULT_CONFIG.get("scan_allowlist", []))
-    return allowlist if isinstance(allowlist, list) else []
+    if not isinstance(allowlist, list):
+        return []
+    normalized = [normalize_allowlist_domain(item) for item in allowlist]
+    return [item for item in normalized if item]
 
 
 def set_scan_allowlist(domains: list[str]) -> bool:
@@ -321,7 +352,8 @@ def set_scan_allowlist(domains: list[str]) -> bool:
     Persist scan allowlist domains for active probing authorization.
     """
     config = load_config()
-    config["scan_allowlist"] = domains
+    normalized = sorted({item for item in (normalize_allowlist_domain(domain) for domain in domains) if item})
+    config["scan_allowlist"] = normalized
     return save_config(config)
 
 
@@ -345,9 +377,9 @@ def get_governance_role() -> str:
     """
     Return current operator role (admin/analyst/viewer).
     """
-    role = str(get_governance_config().get("role", "admin")).lower().strip()
+    role = str(get_governance_config().get("role", "analyst")).lower().strip()
     if role not in {"admin", "analyst", "viewer"}:
-        return "admin"
+        return "analyst"
     return role
 
 

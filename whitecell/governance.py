@@ -3,6 +3,7 @@ White Cell Governance: RBAC, approvals, and audit logging.
 """
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -44,6 +45,10 @@ ROLE_PERMISSIONS = {
 
 def _ensure_logs_dir() -> None:
     LOGS_DIR.mkdir(exist_ok=True)
+    try:
+        os.chmod(LOGS_DIR, 0o700)
+    except OSError:
+        pass
 
 
 def _load_json(path: Path, fallback: Any) -> Any:
@@ -58,7 +63,11 @@ def _load_json(path: Path, fallback: Any) -> Any:
 def _save_json(path: Path, payload: Any) -> bool:
     try:
         _ensure_logs_dir()
-        path.write_text(json.dumps(payload, indent=2))
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
         return True
     except OSError:
         return False
@@ -98,6 +107,10 @@ def audit_event(
     }
     with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
+    try:
+        os.chmod(AUDIT_LOG_FILE, 0o600)
+    except OSError:
+        pass
 
 
 def request_approval(

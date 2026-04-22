@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,24 +16,65 @@ namespace WhiteCellShield
         public required string ProcessName { get; set; }
         public int ProcessId { get; set; }
         public required string OperationType { get; set; }
+        public string? Detail { get; set; }
+    }
+
+    public sealed class ShieldStatus
+    {
+        public required string Status { get; init; }
+        public required string StartedAt { get; init; }
+        public bool IsElevated { get; init; }
+        public bool LsassMonitorEnabled { get; init; }
+        public bool DocumentsMonitorEnabled { get; init; }
+        public int RecentActivityCount { get; init; }
+        public int AlertsRaised { get; init; }
+        public string? LastAlertType { get; init; }
+        public string? LastAlertProcess { get; init; }
+        public string DocumentsPath { get; init; } = "";
     }
 
     public class ShieldAgent
     {
-        private FileSystemWatcher? _watcher;
-        private readonly object _lockObject = new object();
-        private DateTime _lastActivityTime = DateTime.MinValue;
-        private List<string> _recentActivities = new List<string>();
+        private readonly object _lockObject = new();
         private readonly Timer _activityTimer;
-        private const int ACTIVITY_THRESHOLD = 5; // Number of activities to trigger alert
-        private const int TIME_WINDOW_MS = 2000; // Time window in milliseconds
+        private readonly DateTime _startedAt = DateTime.UtcNow;
+        private readonly string _documentsPath;
+        private readonly bool _isElevated;
+        private readonly HashSet<string> _recentActivities = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _protectedExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".pdf", ".txt", ".csv",
+            ".zip", ".7z", ".rar", ".jpg", ".jpeg", ".png", ".bmp", ".gif",
+            ".sql", ".db", ".bak", ".json", ".xml", ".pst", ".ost"
+        };
+        private readonly HashSet<string> _suspiciousProcessNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "mimikatz", "procdump", "procdump64", "dumpert", "nanodump", "rundll32",
+            "comsvcs", "pypykatz", "winpmem"
+        };
+        private readonly HashSet<string> _trustedProcessNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "system", "idle", "svchost", "explorer", "searchindexer", "searchhost",
+            "msmpeng", "whitecellshield", "code", "devenv", "dotnet"
+        };
+        private readonly List<FileSystemWatcher> _watchers = new();
+
+        private DateTime _lastActivityTime = DateTime.MinValue;
+        private string? _lastAlertType;
+        private string? _lastAlertProcess;
+        private int _alertsRaised;
         private bool _isMonitoring = true;
+
+        private const int ActivityThreshold = 5;
+        private const int TimeWindowMs = 2000;
 
         public event EventHandler<ProcessEventArgs>? SuspiciousProcessDetected;
 
         public ShieldAgent()
         {
             _activityTimer = new Timer(ActivityTimerCallback!, null, Timeout.Infinite, Timeout.Infinite);
+            _documentsPath = ResolveDocumentsPath();
+            _isElevated = IsRunningElevated();
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -40,140 +82,202 @@ namespace WhiteCellShield
             SetupLsassMonitor();
             SetupRansomwareDefense();
 
+            EmitStatus("startup");
+
             while (!cancellationToken.IsCancellationRequested)
             {
-                await Task.Delay(100, cancellationToken); // Small delay to prevent busy loop
+                await Task.Delay(200, cancellationToken);
             }
 
             Stop();
         }
 
-        private void SetupLsassMonitor()
+        public ShieldStatus GetStatus()
         {
-            // Monitor for access attempts to lsass process
-            Task.Run(() =>
+            lock (_lockObject)
             {
-                while (_isMonitoring)
+                return new ShieldStatus
                 {
-                    try
-                    {
-                        var lsass = Process.GetProcessesByName("lsass").FirstOrDefault();
-                        if (lsass != null)
-                        {
-                            CheckForSuspiciousAccess(lsass);
-                        }
-                        Thread.Sleep(1000); // Check every second
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.Error.WriteLine($"Error monitoring lsass: {ex.Message}");
-                    }
-                }
-            });
-        }
-
-        private void CheckForSuspiciousAccess(Process lsass)
-        {
-            try
-            {
-                foreach (var process in Process.GetProcesses())
-                {
-                    if (process.Id == lsass.Id || process.ProcessName.Equals("System", StringComparison.OrdinalIgnoreCase))
-                        continue;
-
-                    IntPtr handle = IntPtr.Zero;
-                    try
-                    {
-                        // Try to open the LSASS process to see if another process has access
-                        handle = NativeMethods.OpenProcess(NativeMethods.PROCESS_ACCESS_FLAGS.PROCESS_VM_READ | NativeMethods.PROCESS_ACCESS_FLAGS.PROCESS_QUERY_INFORMATION, false, lsass.Id);
-
-                        if (handle != IntPtr.Zero)
-                        {
-                            // Check if the process has elevated privileges or is doing something suspicious
-                            ProcessModuleCollection modules;
-                            try
-                            {
-                                modules = process.Modules;
-                            }
-                            catch
-                            {
-                                // Can't access modules, skip this process
-                                continue;
-                            }
-                            
-                            // Look for known credential dumping tools/modules
-                            var suspiciousModules = new[] { "samlib.dll", "ntdsapi.dll", "vaultcli.dll", "crypt32.dll" };
-                            var hasSuspiciousModules = false;
-                            foreach (ProcessModule module in modules)
-                            {
-                                if (suspiciousModules.Contains(module.ModuleName.ToLower()))
-                                {
-                                    hasSuspiciousModules = true;
-                                    break;
-                                }
-                            }
-
-                            if (hasSuspiciousModules)
-                            {
-                                OnSuspiciousProcessDetected(new ProcessEventArgs
-                                {
-                                    ProcessName = process.ProcessName,
-                                    ProcessId = process.Id,
-                                    OperationType = "CredentialDumpingAttempt"
-                                });
-                                
-                                // In a real scenario, you might want to terminate or suspend the suspicious process
-                                SuspendProcess(process);
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        if (handle != IntPtr.Zero)
-                        {
-                            NativeMethods.CloseHandle(handle);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error checking for lsass access: {ex.Message}");
+                    Status = _isMonitoring ? "running" : "stopped",
+                    StartedAt = _startedAt.ToString("O"),
+                    IsElevated = _isElevated,
+                    LsassMonitorEnabled = true,
+                    DocumentsMonitorEnabled = _watchers.Count > 0,
+                    RecentActivityCount = _recentActivities.Count,
+                    AlertsRaised = _alertsRaised,
+                    LastAlertType = _lastAlertType,
+                    LastAlertProcess = _lastAlertProcess,
+                    DocumentsPath = _documentsPath
+                };
             }
         }
 
-        private void SetupRansomwareDefense()
+        private string ResolveDocumentsPath()
         {
             string documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            
             if (!Directory.Exists(documentsPath))
             {
-                // Fallback to default path if Documents folder doesn't exist
                 documentsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents");
             }
 
             if (!Directory.Exists(documentsPath))
             {
-                Console.Error.WriteLine("Documents folder not found, creating fallback");
                 Directory.CreateDirectory(documentsPath);
             }
 
-            _watcher = new FileSystemWatcher(documentsPath);
-            _watcher.IncludeSubdirectories = true;
-            _watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size;
-            _watcher.Changed += OnFileChanged!;
-            _watcher.Renamed += OnFileRenamed!;
-            _watcher.EnableRaisingEvents = true;
+            return documentsPath;
+        }
+
+        private static bool IsRunningElevated()
+        {
+            try
+            {
+                using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+                WindowsPrincipal principal = new(identity);
+                return principal.IsInRole(WindowsBuiltInRole.Administrator);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void SetupLsassMonitor()
+        {
+            Task.Run(async () =>
+            {
+                while (_isMonitoring)
+                {
+                    try
+                    {
+                        InspectProcessesForCredentialDumpingSignals();
+                        await Task.Delay(3000);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"Error monitoring LSASS heuristics: {ex.Message}");
+                    }
+                }
+            });
+        }
+
+        private void InspectProcessesForCredentialDumpingSignals()
+        {
+            foreach (Process process in Process.GetProcesses())
+            {
+                try
+                {
+                    if (process.Id == Process.GetCurrentProcess().Id)
+                    {
+                        continue;
+                    }
+
+                    string processName = process.ProcessName;
+                    if (_trustedProcessNames.Contains(processName))
+                    {
+                        continue;
+                    }
+
+                    if (_suspiciousProcessNames.Contains(processName))
+                    {
+                        RaiseAndContain(process, "CredentialDumpingTool", $"Suspicious process name detected: {processName}");
+                        continue;
+                    }
+
+                    List<string> suspiciousModules = GetSuspiciousModules(process);
+                    if (suspiciousModules.Count > 0)
+                    {
+                        RaiseAndContain(process, "CredentialAccessHeuristic", $"Sensitive modules loaded: {string.Join(", ", suspiciousModules)}");
+                    }
+                }
+                catch
+                {
+                    // Ignore inaccessible or short-lived processes.
+                }
+            }
+        }
+
+        private static List<string> GetSuspiciousModules(Process process)
+        {
+            List<string> hits = new();
+            string[] targets = { "samlib.dll", "vaultcli.dll", "dbghelp.dll", "comsvcs.dll", "ntdsapi.dll" };
+
+            try
+            {
+                foreach (ProcessModule module in process.Modules)
+                {
+                    if (targets.Contains(module.ModuleName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        hits.Add(module.ModuleName);
+                    }
+                }
+            }
+            catch
+            {
+                return new List<string>();
+            }
+
+            return hits;
+        }
+
+        private void SetupRansomwareDefense()
+        {
+            FileSystemWatcher watcher = new(_documentsPath)
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                InternalBufferSize = 64 * 1024
+            };
+
+            watcher.Changed += OnFileChanged!;
+            watcher.Renamed += OnFileRenamed!;
+            watcher.Created += OnFileChanged!;
+            watcher.EnableRaisingEvents = true;
+            _watchers.Add(watcher);
         }
 
         private void OnFileChanged(object sender, FileSystemEventArgs e)
         {
-            RecordActivity($"File changed: {e.Name} ({e.FullPath})");
+            if (!ShouldTrackFile(e.FullPath))
+            {
+                return;
+            }
+
+            RecordActivity($"changed:{e.FullPath}");
         }
 
         private void OnFileRenamed(object sender, RenamedEventArgs e)
         {
-            RecordActivity($"File renamed: {e.OldName} -> {e.Name} ({e.FullPath})");
+            if (!ShouldTrackFile(e.FullPath))
+            {
+                return;
+            }
+
+            RecordActivity($"renamed:{e.OldFullPath}->{e.FullPath}");
+        }
+
+        private bool ShouldTrackFile(string path)
+        {
+            string extension = Path.GetExtension(path);
+            if (!_protectedExtensions.Contains(extension))
+            {
+                return false;
+            }
+
+            string fileName = Path.GetFileName(path);
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return false;
+            }
+
+            if (fileName.StartsWith("~", StringComparison.OrdinalIgnoreCase) ||
+                fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+                fileName.EndsWith(".temp", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private void RecordActivity(string activity)
@@ -181,25 +285,23 @@ namespace WhiteCellShield
             lock (_lockObject)
             {
                 _recentActivities.Add(activity);
-                
+
                 if (_lastActivityTime == DateTime.MinValue)
                 {
                     _lastActivityTime = DateTime.Now;
-                    _activityTimer.Change(TIME_WINDOW_MS, Timeout.Infinite);
+                    _activityTimer.Change(TimeWindowMs, Timeout.Infinite);
                 }
-                else if ((DateTime.Now - _lastActivityTime).TotalMilliseconds > TIME_WINDOW_MS)
+                else if ((DateTime.Now - _lastActivityTime).TotalMilliseconds > TimeWindowMs)
                 {
-                    // Reset the timer and activities since the last batch was too long ago
                     _lastActivityTime = DateTime.Now;
                     _recentActivities.Clear();
                     _recentActivities.Add(activity);
-                    _activityTimer.Change(TIME_WINDOW_MS, Timeout.Infinite);
+                    _activityTimer.Change(TimeWindowMs, Timeout.Infinite);
                 }
-                else if (_recentActivities.Count >= ACTIVITY_THRESHOLD)
+                else if (_recentActivities.Count >= ActivityThreshold)
                 {
-                    // Trigger ransomware defense
                     TriggerRansomwareDefense();
-                    _recentActivities.Clear(); // Reset after triggering
+                    _recentActivities.Clear();
                 }
             }
         }
@@ -208,24 +310,17 @@ namespace WhiteCellShield
         {
             lock (_lockObject)
             {
-                _lastActivityTime = DateTime.MinValue; // Reset timer state
+                _lastActivityTime = DateTime.MinValue;
+                _recentActivities.Clear();
             }
         }
 
         private void TriggerRansomwareDefense()
         {
-            // Find the process responsible for the file changes
-            var mostRecentProcess = GetMostRecentlyActiveProcess();
+            Process? mostRecentProcess = GetMostRecentlyActiveProcess();
             if (mostRecentProcess != null)
             {
-                OnSuspiciousProcessDetected(new ProcessEventArgs
-                {
-                    ProcessName = mostRecentProcess.ProcessName,
-                    ProcessId = mostRecentProcess.Id,
-                    OperationType = "RansomwareActivity"
-                });
-
-                SuspendProcess(mostRecentProcess);
+                RaiseAndContain(mostRecentProcess, "RansomwareActivity", "Rapid protected-file changes detected");
             }
         }
 
@@ -233,35 +328,21 @@ namespace WhiteCellShield
         {
             try
             {
-                // Get the process with the most file handles in the Documents directory
-                var processes = Process.GetProcesses();
                 Process? culprit = null;
 
-                string documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-                if (!Directory.Exists(documentsPath))
-                {
-                    documentsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents");
-                }
-
-                foreach (var proc in processes.Where(p => !p.ProcessName.Equals("System", StringComparison.OrdinalIgnoreCase) && 
-                                                         !p.ProcessName.Equals("Idle", StringComparison.OrdinalIgnoreCase)))
+                foreach (Process proc in Process.GetProcesses()
+                    .Where(p => !_trustedProcessNames.Contains(p.ProcessName) && p.Id != Process.GetCurrentProcess().Id))
                 {
                     try
                     {
-                        // We can't easily enumerate handles in .NET without P/Invoke to NtQuerySystemInformation
-                        // As a proxy, we'll use CPU time as an indicator of recent activity
-                        var cpuTime = proc.TotalProcessorTime;
-                        if (proc.Id != Process.GetCurrentProcess().Id) // Exclude our own process
+                        TimeSpan cpuTime = proc.TotalProcessorTime;
+                        if (culprit == null || cpuTime > culprit.TotalProcessorTime)
                         {
-                            if (culprit == null || cpuTime > culprit.TotalProcessorTime)
-                            {
-                                culprit = proc;
-                            }
+                            culprit = proc;
                         }
                     }
                     catch
                     {
-                        // Process might have exited or we don't have permissions
                         continue;
                     }
                 }
@@ -270,47 +351,105 @@ namespace WhiteCellShield
             }
             catch
             {
-                // Fallback: return the current user process with highest ID (most recently created)
                 return Process.GetProcesses()
-                    .Where(p => !p.ProcessName.Equals("System", StringComparison.OrdinalIgnoreCase) &&
-                               !p.ProcessName.Equals("Idle", StringComparison.OrdinalIgnoreCase))
+                    .Where(p => !_trustedProcessNames.Contains(p.ProcessName))
                     .OrderByDescending(p => p.Id)
                     .FirstOrDefault();
             }
         }
 
-        private void SuspendProcess(Process process)
+        private void RaiseAndContain(Process process, string operationType, string detail)
+        {
+            if (_trustedProcessNames.Contains(process.ProcessName))
+            {
+                return;
+            }
+
+            lock (_lockObject)
+            {
+                _alertsRaised += 1;
+                _lastAlertType = operationType;
+                _lastAlertProcess = process.ProcessName;
+            }
+
+            OnSuspiciousProcessDetected(new ProcessEventArgs
+            {
+                ProcessName = process.ProcessName,
+                ProcessId = process.Id,
+                OperationType = operationType,
+                Detail = detail
+            });
+
+            if (_isElevated)
+            {
+                SuspendProcess(process, operationType, detail);
+            }
+            else
+            {
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    alert = operationType,
+                    processName = process.ProcessName,
+                    processId = process.Id,
+                    detail,
+                    action = "observe_only",
+                    reason = "shield_not_elevated",
+                    timestamp = DateTime.UtcNow.ToString("O")
+                }));
+            }
+        }
+
+        private void SuspendProcess(Process process, string operationType, string detail)
         {
             try
             {
-                // Suspend the process using Windows API
                 foreach (ProcessThread thread in process.Threads)
                 {
-                    IntPtr tHandle = NativeMethods.OpenThread(NativeMethods.ThreadAccess.SUSPEND_RESUME, false, (uint)thread.Id);
-                    if (tHandle != IntPtr.Zero)
+                    IntPtr threadHandle = NativeMethods.OpenThread(NativeMethods.ThreadAccess.SUSPEND_RESUME, false, (uint)thread.Id);
+                    if (threadHandle == IntPtr.Zero)
                     {
-                        try
-                        {
-                            NativeMethods.SuspendThread(tHandle);
-                        }
-                        finally
-                        {
-                            NativeMethods.CloseHandle(tHandle);
-                        }
+                        continue;
+                    }
+
+                    try
+                    {
+                        NativeMethods.SuspendThread(threadHandle);
+                    }
+                    finally
+                    {
+                        NativeMethods.CloseHandle(threadHandle);
                     }
                 }
-                
-                Console.WriteLine(JsonSerializer.Serialize(new { 
-                    alert = "Process suspended", 
-                    processName = process.ProcessName, 
+
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    alert = operationType,
+                    processName = process.ProcessName,
                     processId = process.Id,
-                    timestamp = DateTime.UtcNow.ToString("O") 
+                    detail,
+                    action = "suspend",
+                    timestamp = DateTime.UtcNow.ToString("O")
                 }));
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Failed to suspend process {process.ProcessName} ({process.Id}): {ex.Message}");
             }
+        }
+
+        private void EmitStatus(string reason)
+        {
+            ShieldStatus status = GetStatus();
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                status = status.Status,
+                reason,
+                startedAt = status.StartedAt,
+                isElevated = status.IsElevated,
+                lsassMonitorEnabled = status.LsassMonitorEnabled,
+                documentsMonitorEnabled = status.DocumentsMonitorEnabled,
+                documentsPath = status.DocumentsPath
+            }));
         }
 
         protected virtual void OnSuspiciousProcessDetected(ProcessEventArgs e)
@@ -321,37 +460,23 @@ namespace WhiteCellShield
         public void Stop()
         {
             _isMonitoring = false;
-            _watcher?.Dispose();
-            _activityTimer?.Dispose();
+            foreach (FileSystemWatcher watcher in _watchers)
+            {
+                watcher.Dispose();
+            }
+
+            _watchers.Clear();
+            _activityTimer.Dispose();
         }
     }
 
-    // Static class to hold native Windows API methods
     public static class NativeMethods
     {
         [Flags]
         public enum ThreadAccess : int
         {
-            TERMINATE = (0x0001),
-            SUSPEND_RESUME = (0x0002),
-            GET_CONTEXT = (0x0008),
-            SET_CONTEXT = (0x0010),
-            SET_INFORMATION = (0x0020),
-            QUERY_INFORMATION = (0x0040),
-            SET_THREAD_TOKEN = (0x0080),
-            IMPERSONATE = (0x0100),
-            DIRECT_IMPERSONATION = (0x0200)
+            SUSPEND_RESUME = 0x0002
         }
-
-        [Flags]
-        public enum PROCESS_ACCESS_FLAGS : uint
-        {
-            PROCESS_VM_READ = 0x0010,
-            PROCESS_QUERY_INFORMATION = 0x0400
-        }
-
-        [DllImport("kernel32.dll")]
-        public static extern IntPtr OpenProcess(PROCESS_ACCESS_FLAGS processAccess, bool bInheritHandle, int processId);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool CloseHandle(IntPtr hObject);
@@ -363,91 +488,83 @@ namespace WhiteCellShield
         public static extern uint SuspendThread(IntPtr hThread);
     }
 
-    class Program
+    internal static class Program
     {
         private static ShieldAgent? _agent;
         private static CancellationTokenSource? _cancellationTokenSource;
 
-        static async Task Main(string[] args)
+        private static async Task Main(string[] args)
         {
             _cancellationTokenSource = new CancellationTokenSource();
             _agent = new ShieldAgent();
-            
-            // Handle Ctrl+C gracefully
-            Console.CancelKeyPress += (sender, e) =>
+
+            Console.CancelKeyPress += (_, e) =>
             {
                 e.Cancel = true;
                 Shutdown();
             };
 
-            // Start listening for commands from Python
-            var inputTask = ListenForCommands(_cancellationTokenSource.Token);
-            var agentTask = _agent.StartAsync(_cancellationTokenSource.Token);
+            Task inputTask = ListenForCommands(_cancellationTokenSource.Token);
+            Task agentTask = _agent.StartAsync(_cancellationTokenSource.Token);
 
             await Task.WhenAny(inputTask, agentTask);
         }
 
-        static async Task ListenForCommands(CancellationToken cancellationToken)
+        private static async Task ListenForCommands(CancellationToken cancellationToken)
         {
-            string? inputLine;
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
-                    inputLine = Console.ReadLine();
-                    if (inputLine == null) continue; // EOF reached
-
-                    using var doc = JsonDocument.Parse(inputLine);
-                    var root = doc.RootElement;
-
-                    if (root.TryGetProperty("cmd", out var cmdProperty))
+                    string? inputLine = Console.ReadLine();
+                    if (inputLine == null)
                     {
-                        var command = cmdProperty.GetString();
-
-                        switch (command)
-                        {
-                            case "heartbeat":
-                                Console.WriteLine(JsonSerializer.Serialize(new { status = "active" }));
-                                break;
-                            case "stop":
-                                Shutdown();
-                                break;
-                            case "status":
-                                Console.WriteLine(JsonSerializer.Serialize(new { 
-                                    status = "running", 
-                                    uptime = DateTime.UtcNow.ToString("O") 
-                                }));
-                                break;
-                            default:
-                                Console.WriteLine(JsonSerializer.Serialize(new { 
-                                    error = $"Unknown command: {command}" 
-                                }));
-                                break;
-                        }
+                        await Task.Delay(200, cancellationToken);
+                        continue;
                     }
-                    else
+
+                    using JsonDocument doc = JsonDocument.Parse(inputLine);
+                    JsonElement root = doc.RootElement;
+                    if (!root.TryGetProperty("cmd", out JsonElement cmdProperty))
                     {
-                        Console.WriteLine(JsonSerializer.Serialize(new { 
-                            error = "Invalid command format: missing 'cmd' property" 
-                        }));
+                        Console.WriteLine(JsonSerializer.Serialize(new { error = "Invalid command format: missing 'cmd' property" }));
+                        continue;
+                    }
+
+                    string? command = cmdProperty.GetString();
+                    switch (command)
+                    {
+                        case "heartbeat":
+                            Console.WriteLine(JsonSerializer.Serialize(new { status = "active" }));
+                            break;
+                        case "status":
+                            if (_agent == null)
+                            {
+                                Console.WriteLine(JsonSerializer.Serialize(new { error = "Shield not initialized" }));
+                                break;
+                            }
+                            Console.WriteLine(JsonSerializer.Serialize(_agent.GetStatus()));
+                            break;
+                        case "stop":
+                            Shutdown();
+                            break;
+                        default:
+                            Console.WriteLine(JsonSerializer.Serialize(new { error = $"Unknown command: {command}" }));
+                            break;
                     }
                 }
                 catch (JsonException)
                 {
-                    Console.WriteLine(JsonSerializer.Serialize(new { 
-                        error = "Invalid JSON received" 
-                    }));
+                    Console.WriteLine(JsonSerializer.Serialize(new { error = "Invalid JSON received" }));
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine(JsonSerializer.Serialize(new { 
-                        error = $"Error processing command: {ex.Message}" 
-                    }));
+                    Console.WriteLine(JsonSerializer.Serialize(new { error = $"Error processing command: {ex.Message}" }));
                 }
             }
         }
 
-        static void Shutdown()
+        private static void Shutdown()
         {
             Console.WriteLine(JsonSerializer.Serialize(new { status = "shutdown" }));
             _cancellationTokenSource?.Cancel();

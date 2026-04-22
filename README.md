@@ -24,7 +24,12 @@ White Cell is a SOC-first cybersecurity CLI for detection, investigation, and go
 ```text
 CLI (whitecell/cli_enhanced.py)
   -> Engine (whitecell/engine.py)
-  -> Detection + Risk (whitecell/detection.py, whitecell/risk.py)
+  -> Immune System (whitecell/immune/)
+     -> Neutrophils (fast local detection)
+     -> B-Cells (threat memory)
+     -> T-Cells (response orchestration)
+     -> Monocytes (logging and cleanup records)
+     -> Basophils (alert amplification)
   -> Governance (whitecell/governance.py)
   -> Agent System (whitecell/agent.py)
   -> Website Scanner (whitecell/website_scanner.py)
@@ -107,6 +112,7 @@ agent crewai <objective>
 - `QUICKSTART.md` - fast setup and day-1 usage
 - `README_AGENT_SYSTEM.md` - operations and governance detail
 - `RUN_INSTRUCTIONS.md` - Windows-first launch instructions
+- `docs/IMMUNE_ARCHITECTURE.md` - white-blood-cell security model and code mapping
 - `docs/CONTRIBUTING_GITHUB.md` - GitHub contribution troubleshooting
 - `docs/updates.md` - dated project updates
 

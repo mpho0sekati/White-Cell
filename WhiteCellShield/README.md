@@ -4,10 +4,11 @@ A background security agent for the White Cell cybersecurity CLI tool. This appl
 
 ## Features
 
-- **Identity Protection**: Monitors the lsass process and alerts if a non-system process attempts to access its memory (simulating a credential dumping defense).
-- **Ransomware Defense**: Uses FileSystemWatcher to monitor the 'Documents' folder. If more than 5 files are renamed or modified within 2 seconds, it automatically suspends the responsible process.
+- **Credential Dumping Heuristics**: Uses Windows-native process inspection to flag likely dump tooling or sensitive module combinations often associated with LSASS-focused credential access.
+- **Ransomware Defense**: Uses `FileSystemWatcher` to monitor protected user-document extensions in the Documents folder. If rapid protected-file activity crosses the threshold, it attempts to suspend the likely culprit.
+- **Least Surprise Guardrails**: Avoids suspending trusted baseline processes and runs in observe-only mode when not elevated.
 - **JSON Communication**: Communicates with the Python CLI via JSON over Standard Input/Output.
-- **Self-Healing**: Responds to heartbeat commands to confirm operational status.
+- **Operational Telemetry**: Exposes richer shield status, including elevation state, monitors enabled, alert counters, and protected path.
 
 ## Compilation
 
@@ -39,7 +40,17 @@ The executable will be located at: `bin\Release\net8.0\win-x64\publish\WhiteCell
 The application accepts JSON commands via standard input:
 
 - `{"cmd": "heartbeat"}` - Checks if the shield is active. Response: `{"status": "active"}`
-- `{"cmd": "status"}` - Gets current status and uptime. Response: `{"status": "running", "uptime": "timestamp"}`
+- `{"cmd": "status"}` - Gets current shield telemetry. Example response fields:
+  - `status`
+  - `startedAt`
+  - `isElevated`
+  - `lsassMonitorEnabled`
+  - `documentsMonitorEnabled`
+  - `recentActivityCount`
+  - `alertsRaised`
+  - `lastAlertType`
+  - `lastAlertProcess`
+  - `documentsPath`
 - `{"cmd": "stop"}` - Gracefully stops the shield. Response: `{"status": "shutdown"}`
 
 ## Integration with Python Application
@@ -91,16 +102,16 @@ class WhiteCellShieldClient:
 
 ## Security Features
 
-### Identity Protection
+### Credential Access Heuristics
 
-The application continuously monitors for processes attempting to access the lsass (Local Security Authority Subsystem Service) process memory. If a non-system process is detected trying to access lsass, it is flagged as a potential credential dumping attempt and suspended.
+The shield continuously inspects running processes for names and module combinations commonly associated with credential dumping or sensitive credential-access tooling. Suspicious processes trigger structured alerts and are only suspended when the shield is running with elevated rights.
 
 ### Ransomware Defense
 
-Monitors the user's Documents folder for rapid file modifications or renames. If more than 5 files are altered within a 2-second window, the system identifies this as potential ransomware activity and automatically suspends the responsible process.
+Monitors the user's Documents folder for rapid changes to protected file types such as Office files, archives, images, databases, and backups. When suspicious change volume crosses the threshold, the shield raises a ransomware alert and attempts containment.
 
 ## Notes
 
 - Requires Windows OS to run (uses Windows-specific APIs)
-- Needs appropriate permissions to access process memory and suspend other processes
+- Elevation is recommended for containment actions against other processes
 - Runs as a background service that communicates asynchronously with the main application

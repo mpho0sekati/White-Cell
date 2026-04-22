@@ -8,6 +8,14 @@
 - Standardized CLI status messaging across the main and enhanced CLI entry points
 - Centralized governed response action definitions in the enhanced CLI
 - Normalized terminal output to ASCII-safe text for better Windows console compatibility
+- Split the enhanced CLI into smaller modules with a command registry
+
+### Immune System Architecture
+
+- Added `whitecell/immune/` as a first-class architecture layer
+- Implemented neutrophils, B-cells, T-cells, monocytes, and basophils as code modules
+- Moved `whitecell/engine.py` onto the immune-system coordinator path
+- Added initial tests for threat memory and immune pipeline activation
 
 ### Dependency and Runbook Alignment
 

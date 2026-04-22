@@ -41,6 +41,10 @@ MANIFEST
 logs/
 *.log
 
+# .NET build artifacts
+WhiteCellShield/bin/
+WhiteCellShield/obj/
+
 # Environment
 .env
 .env.local

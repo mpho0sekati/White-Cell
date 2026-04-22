@@ -16,6 +16,7 @@
 - Implemented neutrophils, B-cells, T-cells, monocytes, and basophils as code modules
 - Moved `whitecell/engine.py` onto the immune-system coordinator path
 - Added initial tests for threat memory and immune pipeline activation
+- Expanded architecture documentation to describe goals, flow, false-positive risks, and next integration steps
 
 ### Dependency and Runbook Alignment
 

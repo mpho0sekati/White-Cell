@@ -6,11 +6,12 @@ This document covers production usage of White Cell agent operations, SOC workfl
 
 ## Operating Model
 
-White Cell is designed around three layers:
+White Cell is designed around four layers:
 
 1. Detection and risk scoring
-2. SOC workflow execution (`triage`, `investigate`, `respond`)
-3. Governance guardrails (RBAC, approvals, audit)
+2. Immune-system coordination (`neutrophils`, `b-cells`, `t-cells`, `monocytes`, `basophils`)
+3. SOC workflow execution (`triage`, `investigate`, `respond`)
+4. Governance guardrails (RBAC, approvals, audit)
 
 ## Start the Platform
 
@@ -75,6 +76,8 @@ scan website <url> [--active]
 | `analyst` | SOC workflow and passive operations |
 | `admin` | full control including governance updates |
 
+Default role is now `analyst` for better least-privilege posture.
+
 ### Approval-Controlled Actions
 
 Policy is configurable in config and at runtime. Common examples:
@@ -121,7 +124,7 @@ Key sections:
   "groq_api_key": null,
   "scan_allowlist": [],
   "governance": {
-    "role": "admin",
+    "role": "analyst",
     "approval_required_actions": [
       "scan.website.active",
       "respond.block_ip",
@@ -172,3 +175,18 @@ venv\Scripts\python -m pytest -q tests
 - Review approval rules periodically.
 - Rotate API keys and monitor audit log growth.
 - Keep allowlist tight and domain-specific.
+- Treat cloud AI commands as optional and never send raw secrets or sensitive customer data without explicit approval.
+
+## Immune Layer Notes
+
+White Cell now includes an internal immune architecture under `whitecell/immune/`.
+
+Operationally, that means:
+
+- neutrophils handle fast local detection
+- B-cells cache repeat threat memory
+- T-cells coordinate response and command mode
+- monocytes shape durable incident records
+- basophils normalize severity and alert signaling
+
+For architecture detail, see `docs/IMMUNE_ARCHITECTURE.md`.
